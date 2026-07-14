@@ -37,6 +37,7 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMessageBox,
+    QProgressDialog,
     QStyle,
     QTableWidget,
     QTableWidgetItem,
@@ -46,9 +47,7 @@ from PyQt6.QtWidgets import (
 )
 
 from utils.logger import logger
-
-# 支持的音频扩展名（与 processor.file_scanner.AUDIO_EXTENSIONS 保持一致）
-AUDIO_EXTENSIONS = {".mp3", ".flac", ".m4a", ".ogg", ".wma", ".ape"}
+from ui.file_load_worker import FileLoadWorker
 
 # 状态码 → 中文显示文本（状态码与 BatchProcessor 的子步骤/完成状态对齐）
 _STATUS_TEXT = {
@@ -106,10 +105,9 @@ class FileListWidget(QWidget):
         # 文件路径 → 行号 映射（O(1) 查找，用于状态更新与去重）
         self._path_to_row: dict[str, int] = {}
 
-        # 文件名解析器（懒加载；与 parser 模块保持一致的解析逻辑）
-        self._parser = None
-        # 元数据读取器（懒加载；用于读取音频文件已有标签，填充歌手/标题/专辑）
-        self._metadata_reader = None
+        # 后台加载任务（递归扫描 + 元数据读取迁移到 FileLoadWorker，避免 UI 卡死）
+        self._load_worker = None
+        self._load_dialog = None
 
         self._setup_ui()
         # 启用拖放接收（拖入文件/文件夹即可添加）
@@ -212,141 +210,40 @@ class FileListWidget(QWidget):
         layout.addWidget(self._count_label)
 
     # ============================================================
-    # 文件名解析（懒加载 parser）
-    # ============================================================
-    def _get_parser(self):
-        """懒加载文件名解析器。
-
-        优先使用 :mod:`parser.filename_parser.FileNameParser`（与批处理流程
-        解析结果一致），导入失败时回退到 ``None``，由 :meth:`_guess_meta`
-        使用简单启发式。
-        """
-        if self._parser is None:
-            try:
-                from parser.filename_parser import FileNameParser
-                from parser.artist_db import ArtistDB
-                self._parser = FileNameParser(ArtistDB())
-                logger.debug("文件列表面板：FileNameParser 加载成功")
-            except Exception as e:
-                logger.warning(f"FileNameParser 加载失败，回退到简单解析: {e}")
-                self._parser = False  # 标记为已尝试但不可用
-        return self._parser if self._parser is not False else None
-
-    def _get_metadata_reader(self):
-        """懒加载元数据读取器（parser.metadata_reader.MetadataReader）。
-
-        用于读取音频文件已有标签（歌手/标题/专辑等），与批处理流程步骤 2
-        （§10.1）保持一致。导入或初始化失败时回退到 ``None``，由调用方
-        继续使用文件名解析的推断值。
-        """
-        if self._metadata_reader is None:
-            try:
-                from parser.metadata_reader import MetadataReader
-                self._metadata_reader = MetadataReader()
-                logger.debug("文件列表面板：MetadataReader 加载成功")
-            except Exception as e:
-                logger.warning(f"MetadataReader 加载失败，回退到文件名解析: {e}")
-                self._metadata_reader = False  # 标记为已尝试但不可用
-        return self._metadata_reader if self._metadata_reader is not False else None
-
-    def _resolve_meta(self, file_path: str) -> tuple[str, str, str]:
-        """推断 (title, artist, album)。
-
-        先按文件名解析（见 :meth:`_guess_meta`），再用文件已有标签覆盖已知
-        字段——与 :class:`processor.batch_processor.BatchProcessor` 的
-        ``_parse_and_merge_metadata`` 逻辑一致：标签中的真实元数据优先于
-        文件名推断。这样「专辑」列在文件本身带有标签时即可正确显示。
-        """
-        title, artist, album = self._guess_meta(file_path)
-        reader = self._get_metadata_reader()
-        if reader is not None:
-            try:
-                existing = reader.read(file_path)
-                if existing.get("title"):
-                    title = existing["title"]
-                if existing.get("artist"):
-                    artist = existing["artist"]
-                if existing.get("album"):
-                    album = existing["album"]
-            except Exception as e:
-                logger.debug(f"读取标签失败 {file_path}: {e}")
-        return title, artist, album
-
-    def _guess_meta(self, file_path: str) -> tuple[str, str, str]:
-        """从文件名解析 (title, artist, album)。
-
-        优先使用 FileNameParser；不可用时回退到 ``-`` 分割启发式。
-        album 始终返回空串（需读取标签或搜索后才可知）。
-        """
-        name = Path(file_path).stem
-        parser = self._get_parser()
-        if parser is not None:
-            try:
-                title, artist, _album, _uncertain = parser.parse(Path(file_path).name)
-                return title or name, artist or "", ""
-            except Exception as e:
-                logger.debug(f"FileNameParser 解析失败 {file_path}: {e}")
-
-        # 回退启发式：「歌手 - 标题」 或 「标题 - 歌手」 拆分
-        for sep in (" - ", "—", "-", "_"):
-            if sep in name:
-                left, right = name.split(sep, 1)
-                left, right = left.strip(), right.strip()
-                if left and right:
-                    # 默认左侧为歌手、右侧为标题（多数命名习惯）
-                    return right, left, ""
-        return name, "", ""
-
-    # ============================================================
-    # 公开方法：添加/移除/清空
+    # 加载入口（公开方法：添加/移除/清空）
+    #
+    # 扫描文件夹 + 读取元数据已迁移到 :class:`ui.file_load_worker.FileLoadWorker`
+    # （后台线程），解析规则由 :func:`parser.metadata_resolver.resolve_file_meta`
+    # 统一提供，本组件不再在 UI 线程做阻塞式标签读取。
     # ============================================================
     def add_files(self, files: list[str]) -> int:
         """添加一批文件路径到列表（自动去重、过滤非音频文件）。
+
+        文件过滤、递归扫描与元数据读取均在后台线程
+        (:class:`ui.file_load_worker.FileLoadWorker`) 完成，期间显示「加载中」
+        进度对话框，避免打开大目录时 UI 卡死。
 
         Args:
             files: 文件路径列表。
 
         Returns:
-            实际新增的文件数量（已存在的不计入）。
+            本方法为异步加载，返回 0（实际新增数量在加载完成后体现）。
         """
-        added = 0
-        self._table.setSortingEnabled(False)
-        self._table.blockSignals(True)  # 批量插入期间屏蔽 itemChanged，避免 O(n^2)
-        try:
-            for path in files:
-                if not path:
-                    continue
-                path = os.path.normpath(path)
-                if path in self._path_to_row:
-                    continue
-                # 仅接受支持的音频扩展名
-                if Path(path).suffix.lower() not in AUDIO_EXTENSIONS:
-                    continue
-                if not os.path.isfile(path):
-                    continue
-                self._append_row(path)
-                added += 1
-        finally:
-            self._table.blockSignals(False)
-            self._table.setSortingEnabled(True)
-
-        if added > 0:
-            self._refresh_index_column()
-            self._refresh_count()
-            self.files_changed.emit()
-        return added
+        items = [os.path.normpath(f) for f in files if f]
+        self._start_loading(items)
+        return 0
 
     def add_folder(self, folder: Optional[str] = None) -> int:
         """添加一个文件夹中的所有音频文件（递归）。
 
-        若 ``folder`` 为 ``None``，弹出文件夹选择对话框。
-        遍历过程中遇到无权限/损坏的子目录会被跳过，而不是让程序崩溃。
+        若 ``folder`` 为 ``None``，弹出文件夹选择对话框。递归扫描与元数据读取
+        在后台线程完成，期间显示「加载中」进度对话框，避免 UI 卡死。
 
         Args:
             folder: 文件夹路径，传入 ``None`` 时弹出选择对话框。
 
         Returns:
-            实际新增的文件数量。
+            本方法为异步加载，返回 0（实际新增数量在加载完成后体现）。
         """
         # folder 可能为 None（菜单/工具栏入口）或被信号误传为 bool False，
         # 统一在此归一化：仅当传入有效路径字符串时才跳过文件夹选择对话框
@@ -356,31 +253,8 @@ class FileListWidget(QWidget):
             if not folder:
                 return 0
 
-        # 递归收集音频文件（跳过无权限/损坏的子目录，避免崩溃）
-        collected: list[str] = []
-        skip_dirs = {"$recycle.bin", "system volume information", "lost+found"}
-        try:
-            for root, dirs, filenames in os.walk(folder, onerror=self._on_walk_error):
-                # 原地修改 dirs 以跳过系统隐藏文件夹（os.walk 约定）
-                dirs[:] = [d for d in dirs if d.lower() not in skip_dirs]
-                for fname in filenames:
-                    if Path(fname).suffix.lower() in AUDIO_EXTENSIONS:
-                        collected.append(os.path.join(root, fname))
-        except Exception as e:
-            logger.error(f"遍历文件夹失败 {folder}: {e}", exc_info=True)
-            QMessageBox.warning(
-                self, "错误", f"遍历文件夹时出错，已跳过部分内容：\n{e}")
-            return 0
-
-        if not collected:
-            logger.info(f"文件夹中未发现音频文件: {folder}")
-            return 0
-
-        return self.add_files(collected)
-
-    def _on_walk_error(self, err: OSError):
-        """``os.walk`` 遇到无权限子目录时的回调：记录并跳过。"""
-        logger.warning(f"跳过无权限目录: {getattr(err, 'filename', '')} ({err})")
+        self._start_loading([os.path.normpath(folder)])
+        return 0
 
     def remove_selected(self):
         """移除当前选中的所有行。"""
@@ -533,13 +407,18 @@ class FileListWidget(QWidget):
     # ============================================================
     # 内部辅助
     # ============================================================
-    def _append_row(self, file_path: str):
-        """向表格追加一行（含勾选列与序号列）。调用方需保证 file_path 不重复。"""
+    def _append_row(self, file_path: str, title: str = "", artist: str = "",
+                    album: str = ""):
+        """向表格追加一行（含勾选列与序号列）。
+
+        元数据（title/artist/album）由调用方传入（来自后台 worker 已解析好的
+        结果），本方法不再在 UI 线程做阻塞式标签读取。调用方需保证
+        file_path 不重复且是存在的音频文件。
+        """
         row = self._table.rowCount()
         self._table.insertRow(row)
 
         filename = os.path.basename(file_path)
-        title, artist, album = self._resolve_meta(file_path)
         fmt = Path(file_path).suffix.lower().lstrip(".")
 
         # 勾选列（默认勾选，批处理仅处理已勾选项）
@@ -577,6 +456,120 @@ class FileListWidget(QWidget):
 
         self._files.append(file_path)
         self._path_to_row[file_path] = row
+
+    def _append_rows_resolved(self, entries: list) -> int:
+        """批量追加已解析好的行（后台加载完成后调用，不在 UI 线程做 I/O）。
+
+        Args:
+            entries: ``[(path, title, artist, album), ...]`` 列表。
+
+        Returns:
+            实际新增的文件数量（已存在的不计入）。
+        """
+        added = 0
+        self._table.setSortingEnabled(False)
+        self._table.blockSignals(True)  # 批量插入期间屏蔽 itemChanged，避免 O(n^2)
+        try:
+            for entry in entries:
+                if not entry:
+                    continue
+                path = os.path.normpath(entry[0])
+                if path in self._path_to_row:
+                    continue
+                if not os.path.isfile(path):
+                    continue
+                title = entry[1] if len(entry) > 1 else ""
+                artist = entry[2] if len(entry) > 2 else ""
+                album = entry[3] if len(entry) > 3 else ""
+                self._append_row(path, title, artist, album)
+                added += 1
+        finally:
+            self._table.blockSignals(False)
+            self._table.setSortingEnabled(True)
+
+        if added > 0:
+            self._refresh_index_column()
+            self._refresh_count()
+            self.files_changed.emit()
+        return added
+
+    # ============================================================
+    # 后台加载（FileLoadWorker + QProgressDialog，避免大目录卡死 UI）
+    # ============================================================
+    def _start_loading(self, items: list):
+        """启动后台加载线程，并显示「加载中」进度对话框。
+
+        将递归扫描 + 元数据读取交给 :class:`FileLoadWorker` 在后台线程执行，
+        期间主线程显示模态进度框并响应「取消」；加载完成后再批量建表。若已有
+        加载任务在运行，本次请求被忽略，避免并发写入表格。
+
+        Args:
+            items: 待加载路径列表（文件与文件夹可混合）。
+        """
+        if not items:
+            return
+        if self._load_worker is not None and self._load_worker.isRunning():
+            logger.debug("已有加载任务在运行，忽略本次请求")
+            return
+
+        dlg = QProgressDialog(self)
+        dlg.setWindowTitle("加载中")
+        dlg.setLabelText("正在扫描文件…")
+        dlg.setRange(0, 0)  # 不确定模式，待获知总数后切换为确定模式
+        dlg.setCancelButtonText("取消")
+        dlg.setMinimumDuration(0)
+        dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self._load_dialog = dlg
+
+        worker = FileLoadWorker(items)
+        self._load_worker = worker
+        worker.progress.connect(self._on_load_progress)
+        worker.finished.connect(self._on_load_finished)
+        worker.error.connect(self._on_load_error)
+        dlg.canceled.connect(worker.request_stop)
+
+        worker.start()
+        dlg.exec()
+
+    def _on_load_progress(self, done: int, total: int, path: str):
+        """后台线程回报进度：更新进度对话框。"""
+        dlg = self._load_dialog
+        if dlg is None:
+            return
+        if dlg.maximum() != total:
+            dlg.setRange(0, total)
+        dlg.setLabelText(f"正在加载：{os.path.basename(path)}")
+        dlg.setValue(done)
+
+    def _on_load_finished(self, entries: list):
+        """加载完成：批量建表并关闭进度框（用户取消则丢弃结果）。"""
+        worker = self._load_worker
+        dlg = self._load_dialog
+        aborted = bool(worker and worker._stop.is_set()) if worker else False
+        try:
+            if not aborted and entries:
+                self._append_rows_resolved(entries)
+            elif aborted:
+                logger.info("用户取消加载，已丢弃未完成的扫描结果")
+        finally:
+            if dlg is not None:
+                dlg.accept()  # 关闭模态进度框
+            self._cleanup_load()
+
+    def _on_load_error(self, msg: str):
+        """加载阶段出错：提示用户并关闭进度框。"""
+        dlg = self._load_dialog
+        if dlg is not None:
+            dlg.accept()
+        self._cleanup_load()
+        QMessageBox.warning(self, "错误", f"加载文件时出错：\n{msg}")
+
+    def _cleanup_load(self):
+        """清理后台加载相关引用（worker 走 deleteLater，避免悬空指针）。"""
+        if self._load_worker is not None:
+            self._load_worker.deleteLater()
+            self._load_worker = None
+        self._load_dialog = None
 
     def _rebuild_path_map(self):
         """删除行后重建「路径 → 行号」映射。"""
@@ -669,30 +662,19 @@ class FileListWidget(QWidget):
             event.ignore()
 
     def dropEvent(self, event: QDropEvent):
-        """放下时：把所有文件 URL 收集并添加（文件夹递归）。"""
+        """放下时：把所有文件/文件夹 URL 交给后台加载（文件夹递归）。"""
         if not event.mimeData().hasUrls():
             event.ignore()
             return
 
-        files: list[str] = []
+        items: list[str] = []
         for url in event.mimeData().urls():
             path = url.toLocalFile()
-            if not path:
-                continue
-            if os.path.isdir(path):
-                # 文件夹：递归收集（跳过无权限子目录）
-                try:
-                    for root, _dirs, filenames in os.walk(path, onerror=self._on_walk_error):
-                        for fname in filenames:
-                            if Path(fname).suffix.lower() in AUDIO_EXTENSIONS:
-                                files.append(os.path.join(root, fname))
-                except Exception as e:
-                    logger.warning(f"拖放遍历文件夹出错 {path}: {e}")
-            elif os.path.isfile(path):
-                files.append(path)
+            if path:
+                items.append(path)
 
-        if files:
-            self.add_files(files)
+        if items:
+            self._start_loading(items)
             event.acceptProposedAction()
         else:
             event.ignore()
