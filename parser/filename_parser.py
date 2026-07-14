@@ -89,16 +89,44 @@ class FileNameParser:
                 title, artist, album, uncertain = result
                 return (title, artist, album, uncertain)
 
-        # 两段式：歌曲名-歌手 或 歌手-歌曲名
-        m = re.match(r'^(.+?)\s*[-–—]\s*(.+?)$', cleaned)
+        # 两段式（短横分隔）：歌曲名-歌手 或 歌手-歌曲名
+        m = re.match(r'^(.+?)\s*[-_–—]\s*(.+?)$', cleaned)
         if m:
             part1, part2 = m.group(1).strip(), m.group(2).strip()
             result = self._resolve_two_part(part1, part2)
             if result:
                 return (*result, False)
 
+        # 两段式（空格分隔）：歌曲名 歌手（无短横时的兜底尝试）
+        # 仅当空格分隔后第二段看起来像歌手名时才生效，避免误切普通空格标题
+        if ' ' in cleaned:
+            space_parts = cleaned.rsplit(maxsplit=1)
+            if len(space_parts) == 2:
+                sp1, sp2 = space_parts
+                if self._looks_like_artist(sp2):
+                    return (sp1, sp2, None, False)
+
         # 兜底：当作单纯歌曲名处理
         return (cleaned, None, None, False)
+
+    def _looks_like_artist(self, candidate: str) -> bool:
+        """检查字符串是否可能是歌手名（用于空格分隔的兜底判断）。
+
+        检测顺序：
+        1. 含有多歌手分隔符（& / ／ 等）→ 是
+        2. 命中 ArtistDB 已知艺人 → 是
+        3. 中文 2-4 字，首字为常见姓 → 是
+        4. 其他情况 → 否（保守）
+        """
+        if self._ARTIST_HINTS.search(candidate):
+            return True
+        if self.artist_db.lookup(candidate) is not None:
+            return True
+        if candidate and len(candidate) <= 4 and '\u4e00' <= candidate[0] <= '\u9fff':
+            surnames = self.artist_db.get_surname_set()
+            if candidate[0] in surnames:
+                return True
+        return False
 
     def _resolve_two_part(self, p1: str, p2: str) -> Optional[tuple]:
         """
