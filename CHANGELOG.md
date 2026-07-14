@@ -3,6 +3,66 @@
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式，
 版本号遵循 [语义化版本控制 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [1.0.22] - 2026-07-14
+
+### Fixed
+
+- **手动保存后封面图消失（保存模式为 FILES 时）**：`_on_save_requested` 构造 `TrackMetadata` 时未传入 `cover_data` 和 `lyrics_text`，导致 UI 更新将封面设为 `None`。现已补传。
+- **切换文件再切回后封面/歌词消失（FILES 模式）**：FILES 模式将封面和歌词保存为同目录的 `cover.jpg` / `.lrc` 而非嵌入标签，`MetadataReader.read_cover()` / `read_lyrics()` 只读取标签内嵌数据，切换文件重读时返回 `None`。已添加回退逻辑：标签内无数据时分别检查同目录的 `cover.jpg` 和 `.lrc` 文件。
+
+## [1.0.21] - 2026-07-14
+
+### Fixed
+
+- **mutagen 文件句柄未显式释放导致 Windows 下 rename/move 失败（WinError 32）**：手动保存标签后，批处理对该文件的后续「重命名」和「目录整理」因 `audio.save()` 后句柄未被释放而锁定。已对所有 6 个格式的 tag writer（mp3/flac/m4a/ogg/ape/wma）以及 `encoding_service.py`、`metadata_reader.py` 中的每次 `audio.save()` 和读取操作添加了 `del audio` 显式清理。
+
+## [1.0.20] - 2026-07-14
+
+### Added
+
+- **详情面板「保存到文件」后同步更新主页面列表**：手动保存元数据到文件标签后，主窗口文件列表的歌手/标题/专辑等列同步刷新；若详情面板当前显示的正是该文件，面板数据也随之更新。
+
+### Fixed
+
+- **详情面板「网络搜索信息」未使用相似度降级逻辑**：手动搜索直接调用 `engine.search_metadata` 未传入 `similarity_fn`，仍为"首个非空即收"模式。现改为与批处理搜索一致的相似度降级匹配（`BatchProcessor._title_similarity`）。
+
+## [1.0.19] - 2026-07-14
+
+### Fixed
+
+- **搜索返回同一歌手的不同歌曲覆盖正确文件名解析**：`SearchEngine` 原为「首个非空即收」模式，当 Provider 返回同歌手不同歌时直接覆盖。改为相似度降级匹配：搜索时携带 `_title_similarity` 字符级校验函数（`difflib.SequenceMatcher`），各 Provider 依次尝试，首个返回 ≥35% 相似度的结果直接采用；若全部 Provider 都返回低分结果，则自动选相似度最高者并记录 info 日志。
+
+## [1.0.18] - 2026-07-14
+
+### Fixed
+
+- **空格分隔的文件名「歌曲名 歌手」解析为整串标题**：两段式解析器仅识别 `-` / `–` / `—` 作为分隔符，纯空格分隔的 `124.这首歌唱给你 王奕心&郑东.mp3` 无法切分歌手，搜索结果完全错配。增加空格分隔兜底逻辑：两段式短横匹配失败后，用 `rsplit(maxsplit=1)` 取最后一段，通过 `_looks_like_artist()`（含 `&`、命中艺人库、中文姓氏）判断是否为歌手。
+- **繁体→简体（T2S）转换实际未生效**：`hanziconv` 已在 `requirements.txt` 声明但未安装（`ImportError` 被静默捕获），`_t2s()` 降级为原样返回。现已安装，`鄭中基` → `郑中基` 等转换正常工作。
+
+## [1.0.17] - 2026-07-14
+
+### Fixed
+
+- **打开带内嵌封面的 MP3 试听弹窗时卡死**：QMediaPlayer (Windows Media Foundation) 将内嵌封面（APIC/mjpeg）识别为视频流，`setSource` 在构造函数中同步初始化视频解码管道，阻塞 UI 线程。改为 `QTimer.singleShot(0, ...)` 延迟到对话框构建完成、事件循环就绪后再调用 `setSource`，消除启动卡死（c.f. QMediaPlayer on Windows + embedded cover known issue）。
+- **关闭试听弹窗时 `RuntimeError: wrapped C/C++ object of type _LyricsSearchWorker has been deleted` 崩溃**：`closeEvent` → `_stop_lyrics_worker` 中访问已自然结束并被 `deleteLater` 销毁的 worker 对象。用 `try/except RuntimeError` 安全处理 worker 已销毁的场景。
+
+## [1.0.16] - 2026-07-14
+
+### Fixed
+
+- **冲突解决「跳过」时 UI 日志误标为「完成」**：`_organize_file` 中的 skip 路径原返回 `None`，导致 `_process_one` 正常结束、UI 显示"✓ 完成"。改为抛出 `DuplicateFileException`，让 `run()` 的现有 `except` 分支捕获并发射 `file_finished(file, "skipped")`，底部日志正确显示"⊘ 已跳过"。
+
+## [1.0.15] - 2026-07-14
+
+### Changed
+
+- **试听弹窗保存歌词遵循配置**：`_save_to_file` 不再硬编码同时写入文件标签 + LRC，改为读取配置的 `save_mode`（`tags`/`files`/`both`），与批处理和手动保存行为一致。弹窗新增 `save_mode` 参数，主窗口创建时传入当前配置值。
+
+### Fixed
+
+- **试听弹窗保存后关闭崩溃**：`_save_to_file` 写入歌词前先调用 `player.stop()` 释放文件句柄，避免 Windows Media Foundation 管道因底层文件被 mutagen 修改而状态不一致，导致关闭弹窗时 `closeEvent` 里的 `player.stop()` 崩溃。
+- **批处理后文件列表元数据未刷新**：`BatchProcessor` 新增 `file_metadata_updated` 信号，`_process_one` 处理完每个文件后发射已解析的元数据字典（歌手/标题/专辑/年份/流派/曲目号/封面/歌词）。主窗口连接该信号，自动更新文件列表的歌手/标题/专辑列，若详情面板当前显示该文件则同步刷新面板，修复批处理完成后列表仍显示旧数据的问题。
+
 ## [1.0.14] - 2026-07-14
 
 ### Added
