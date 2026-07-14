@@ -13,7 +13,7 @@ import time
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 
 import httpx
 
@@ -251,12 +251,41 @@ class SearchEngine:
         """注册一个 Provider 到引擎（按 ``provider_id`` 索引）"""
         self.providers[provider.provider_id] = provider
 
-    def search_metadata(self, title: str, artist: str) -> Optional[TrackMetadata]:
+    def search_metadata(
+        self,
+        title: str,
+        artist: str,
+        similarity_fn: Optional[Callable[[str, str], float]] = None,
+        similarity_threshold: float = 0.35,
+    ) -> Optional[TrackMetadata]:
         """按优先级搜索元数据。
 
-        依次尝试 ``config.active_order`` 中已启用的 Provider，
-        首个返回非空结果的 Provider 即采用，并标注 ``source``。
+        依次尝试 ``config.active_order`` 中已启用的 Provider。
+        当提供了 ``similarity_fn`` 时：首个返回且标题相似度 ≥
+        ``similarity_threshold`` 的 Provider 结果直接采用（短路）；
+        若所有 Provider 均返回低分结果，则从中选出相似度最高者返回，
+        并记录一条 info 日志说明降级情况。
+
+        未提供 ``similarity_fn`` 时保持原有的"首个非空即收"行为。
         """
+        if similarity_fn is None:
+            # 原始行为：首个非空即收
+            for pid in self.config.active_order:
+                provider = self.providers.get(pid)
+                if not provider or not self.config.is_enabled(pid):
+                    continue
+                try:
+                    result = provider.search_metadata(title, artist)
+                    if result:
+                        result.source = pid
+                        return result
+                except Exception as e:
+                    logger.warning(f"[{pid}] 搜索失败: {e}")
+            return None
+
+        # 降级模式：逐 Provider 尝试，高分短路，低分收集
+        best_score = -1.0
+        best_result: Optional[TrackMetadata] = None
         for pid in self.config.active_order:
             provider = self.providers.get(pid)
             if not provider or not self.config.is_enabled(pid):
@@ -265,10 +294,22 @@ class SearchEngine:
                 result = provider.search_metadata(title, artist)
                 if result:
                     result.source = pid
-                    return result
+                    score = similarity_fn(title, result.title or "")
+                    if score >= similarity_threshold:
+                        return result  # 足够可靠，短路
+                    if score > best_score:
+                        best_score = score
+                        best_result = result
             except Exception as e:
                 logger.warning(f"[{pid}] 搜索失败: {e}")
-        return None
+
+        if best_result is not None:
+            logger.info(
+                f"所有搜索结果与查询「{title}」相似度均低于 "
+                f"{similarity_threshold:.0%}，采用来自 "
+                f"[{best_result.source}] 的最高得分 {best_score:.0%}"
+            )
+        return best_result
 
     def search_lyrics(self, title: str, artist: str, album: str = "") -> Optional[str]:
         """按优先级搜索歌词（仅尝试支持歌词能力的 Provider）。

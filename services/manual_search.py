@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     # 仅用于类型检查，运行时不导入，避免对尚未实现的 search 引擎产生硬依赖
@@ -46,8 +46,13 @@ class SearchResult:
 class ManualSearchService:
     """手动搜索服务 — 供详情面板「网络搜索信息」按钮调用。"""
 
-    def __init__(self, search_engine: "SearchEngine"):
+    def __init__(
+        self,
+        search_engine: "SearchEngine",
+        similarity_fn: "Optional[Callable[[str, str], float]]" = None,
+    ):
         self.engine = search_engine
+        self.similarity_fn = similarity_fn
 
     def search(self, title: str, artist: str) -> list[SearchResult]:
         """并行搜索元数据、歌词和封面，返回候选列表（最多 3 条）。
@@ -73,7 +78,10 @@ class ManualSearchService:
         self, title: str, artist: str
     ) -> "Optional[TrackMetadata]":
         try:
-            return self.engine.search_metadata(title, artist)
+            return self.engine.search_metadata(
+                title, artist,
+                similarity_fn=self.similarity_fn,
+            )
         except Exception as e:
             logger.warning(f"手动搜索元数据失败: {e}")
             return None
