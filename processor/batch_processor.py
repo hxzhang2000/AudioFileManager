@@ -74,6 +74,8 @@ class BatchProcessor(QThread):
     batch_finished = pyqtSignal(int, int)
     # 严重错误信号：error_message
     error_occurred = pyqtSignal(str)
+    # 暂停状态变化信号：paused(True=已暂停, False=已继续)
+    pause_state_changed = pyqtSignal(bool)
 
     # 子步骤名称列表（§10.7.5），共 6 步
     _SUB_STEPS = ["parsing", "searching", "enriching", "encoding", "writing", "organizing"]
@@ -89,6 +91,10 @@ class BatchProcessor(QThread):
         super().__init__()
         # 线程安全的停止信号（§10.4.2）
         self._stop_event = threading.Event()
+        # 线程安全的暂停/继续信号（§10.4.3）：set = 运行，clear = 暂停
+        self._resume_event = threading.Event()
+        self._resume_event.set()
+        self._paused = False
         self.files = files
         self.config = config
         self.state_file = state_file
@@ -154,6 +160,29 @@ class BatchProcessor(QThread):
         剩余文件全部保留为 pending 状态，状态文件保存当前进度。
         """
         self._stop_event.set()
+        # 若线程正处于暂停阻塞中，唤醒它以便观察停止信号并退出
+        self._resume_event.set()
+
+    def pause(self):
+        """外部调用：点击「暂停」按钮触发。
+
+        设置暂停标志，当前正在处理的一个文件允许完成后暂停，
+        线程在下一文件处理前阻塞，直到 resume() 或 stop() 唤醒。
+        """
+        if not self.isRunning():
+            return
+        self._paused = True
+        self._resume_event.clear()
+
+    def resume(self):
+        """外部调用：点击「继续」按钮触发，唤醒被暂停的线程。"""
+        self._paused = False
+        self._resume_event.set()
+
+    @property
+    def is_paused(self) -> bool:
+        """是否处于暂停态（线程安全读取）。"""
+        return self._paused
 
     # ============================================================
     # 网络检测（§10.9 离线模式）
@@ -206,6 +235,17 @@ class BatchProcessor(QThread):
 
         try:
             for i, file_path in enumerate(self.files):
+                # 暂停门（§10.4.3）：若已暂停，阻塞直到继续或停止
+                # （当前文件允许完成后生效，与停止语义一致）
+                if self._paused:
+                    self.pause_state_changed.emit(True)
+                    self._resume_event.wait()
+                    if self._is_stopped:
+                        # 暂停期间被停止，交给下方停止判断处理
+                        pass
+                    else:
+                        self.pause_state_changed.emit(False)
+
                 # 检查停止信号（处理新文件前）
                 if self._is_stopped:
                     logger.info(f"用户手动停止批处理，已处理 {i}/{total} 个文件")

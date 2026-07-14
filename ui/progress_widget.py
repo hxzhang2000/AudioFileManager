@@ -88,6 +88,8 @@ class ProgressWidget(QWidget):
     start_requested = pyqtSignal()
     # 用户点击「停止」按钮
     stop_requested = pyqtSignal()
+    # 用户点击「暂停/继续」按钮
+    pause_requested = pyqtSignal()
 
     # 日志最大保留行数（超出后从头部截断，避免内存无限增长）
     _MAX_LOG_BLOCKS = 2000
@@ -134,7 +136,12 @@ class ProgressWidget(QWidget):
         self._btn_stop.setToolTip("停止批处理（当前文件完成后停止）")
         self._btn_start.clicked.connect(self._on_start_clicked)
         self._btn_stop.clicked.connect(self._on_stop_clicked)
+        self._btn_pause = QPushButton("暂停", self)
+        self._btn_pause.setObjectName("warningButton")
+        self._btn_pause.setToolTip("暂停批处理（当前文件完成后暂停）；再次点击继续")
+        self._btn_pause.clicked.connect(self._on_pause_clicked)
         top_row.addWidget(self._btn_start)
+        top_row.addWidget(self._btn_pause)
         top_row.addWidget(self._btn_stop)
 
         layout.addLayout(top_row)
@@ -286,6 +293,8 @@ class ProgressWidget(QWidget):
         self._running = running
         self._btn_start.setEnabled(not running)
         self._btn_stop.setEnabled(running)
+        self._btn_pause.setEnabled(running)
+        self._btn_pause.setText("暂停")
         if running:
             self._btn_start.setText("运行中…")
             self._start_time = None  # 新批次重新计时
@@ -297,6 +306,14 @@ class ProgressWidget(QWidget):
     def is_running(self) -> bool:
         """返回当前是否处于运行态。"""
         return self._running
+
+    def set_paused(self, paused: bool):
+        """更新暂停按钮的显示状态（按钮文本在「暂停 / 继续」间切换）。
+
+        Args:
+            paused: 是否已暂停（``True`` 显示「继续」，``False`` 显示「暂停」）。
+        """
+        self._btn_pause.setText("继续" if paused else "暂停")
 
     def reset(self):
         """重置进度显示（清空进度条与当前文件标签，保留日志）。"""
@@ -319,6 +336,10 @@ class ProgressWidget(QWidget):
     def _on_start_clicked(self):
         """「开始」按钮：发出 start_requested 信号。"""
         self.start_requested.emit()
+
+    def _on_pause_clicked(self):
+        """「暂停/继续」按钮：发出 pause_requested 信号。"""
+        self.pause_requested.emit()
 
     def _on_stop_clicked(self):
         """「停止」按钮：发出 stop_requested 信号。"""

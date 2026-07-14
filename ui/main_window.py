@@ -228,6 +228,7 @@ class MainWindow(QMainWindow):
         # 进度组件的 开始/停止 按钮
         self.progress_widget.start_requested.connect(self._on_start_batch)
         self.progress_widget.stop_requested.connect(self._on_stop_batch)
+        self.progress_widget.pause_requested.connect(self._on_pause_batch)
 
         # 详情面板的 搜索/保存 信号
         self.detail_panel.search_requested.connect(self._on_search_requested)
@@ -473,6 +474,7 @@ class MainWindow(QMainWindow):
         self._batch.file_renamed.connect(self._on_file_renamed)
         self._batch.batch_finished.connect(self._on_batch_finished)
         self._batch.error_occurred.connect(self._on_batch_error)
+        self._batch.pause_state_changed.connect(self.progress_widget.set_paused)
 
         # 切换 UI 为运行态
         self.progress_widget.reset()
@@ -493,6 +495,25 @@ class MainWindow(QMainWindow):
         self._status.showMessage("正在停止批处理（当前文件完成后停止）…")
         self.progress_widget.log_message("用户请求停止批处理，等待当前文件完成…")
         self._act_stop.setEnabled(False)
+
+    def _on_pause_batch(self):
+        """暂停/继续批处理：根据当前状态切换（§10.4.3）。
+
+        点击一次暂停（当前文件完成后生效），再次点击继续；
+        进度组件按钮文本与状态栏/日志同步。
+        """
+        if self._batch is None or not self._batch.isRunning():
+            return
+        if self._batch.is_paused:
+            self._batch.resume()
+            self.progress_widget.set_paused(False)
+            self._status.showMessage("继续批处理…")
+            self.progress_widget.log_message("用户请求继续批处理")
+        else:
+            self._batch.pause()
+            self.progress_widget.set_paused(True)
+            self._status.showMessage("已暂停批处理（当前文件完成后暂停）…")
+            self.progress_widget.log_message("用户请求暂停批处理，等待当前文件完成…")
 
     def _on_batch_progress(self, current, total, step_name, step_index, step_total):
         """批处理进度信号 → 进度组件。"""
