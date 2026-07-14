@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AudioFileManager - 主窗口</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, "Microsoft YaHei", "Segoe UI", sans-serif; }
+body { background: #1a1a2e; display: flex; justify-content: center; align-items: center; min-height: 100vh; gap: 30px; padding: 40px; flex-wrap: wrap; }
+
+.window {
+  background: #2d2d3f;
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  overflow: hidden;
+  width: 1100px;
+  border: 1px solid #3d3d52;
+}
+.titlebar {
+  background: #252538;
+  padding: 12px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #3d3d52;
+  user-select: none;
+}
+.titlebar .title { color: #ddd; font-size: 14px; font-weight: 500; }
+.titlebar .controls span { color: #888; margin-left: 12px; font-size: 16px; cursor: pointer; }
+
+.toolbar {
+  background: #2d2d3f;
+  padding: 10px 20px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  border-bottom: 1px solid #3a3a4f;
+  flex-wrap: wrap;
+}
+.toolbar-info {
+  background: #2d2d3f;
+  padding: 2px 20px 8px 20px;
+  font-size: 11px;
+  color: #999;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-bottom: 1px solid #3a3a4f;
+  margin-top: -4px;
+}
+.group-header {
+  background: #2a2a40;
+  color: #aaa;
+  font-size: 11px;
+  padding: 5px 10px;
+  font-weight: bold;
+  border-bottom: 1px solid #3a3a52;
+  cursor: default;
+}
+.toolbar .btn {
+  background: #3a3a52;
+  border: none;
+  color: #ccc;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.toolbar .btn:hover { background: #4a4a65; }
+.toolbar .btn.primary { background: #5b6abf; color: #fff; }
+.toolbar .btn.primary:hover { background: #6b7adf; }
+.toolbar .search { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.toolbar .search input {
+  background: #1e1e32;
+  border: 1px solid #3a3a52;
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: #ccc;
+  font-size: 13px;
+  width: 200px;
+  outline: none;
+}
+.toolbar .search input:focus { border-color: #5b6abf; }
+.toolbar .search .icon { color: #888; font-size: 14px; }
+
+.main-body {
+  display: flex;
+  min-height: 500px;
+}
+.file-list-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.detail-panel {
+  width: 380px;
+  min-width: 280px;
+  background: #252538;
+  border-left: 1px solid #3a3a52;
+  overflow-y: auto;
+  position: relative;
+  transition: width 0.2s;
+}
+.detail-panel.collapsed {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-left: none;
+}
+.detail-toggle {
+  position: absolute;
+  left: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #3a3a52;
+  border: none;
+  color: #888;
+  width: 20px;
+  height: 40px;
+  border-radius: 6px 0 0 6px;
+  cursor: pointer;
+  font-size: 12px;
+  z-index: 5;
+}
+.detail-toggle:hover { background: #4a4a65; }
+
+.list-header {
+  display: grid;
+  grid-template-columns: 36px 1fr 120px 100px 80px;
+  padding: 8px 16px;
+  color: #888;
+  font-size: 12px;
+  border-bottom: 1px solid #3a3a52;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.list-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+.list-row {
+  display: grid;
+  grid-template-columns: 36px 1fr 120px 100px 80px;
+  padding: 10px 16px;
+  color: #ccc;
+  font-size: 13px;
+  border-bottom: 1px solid #333348;
+  gap: 8px;
+  cursor: pointer;
+  align-items: center;
+}
+.list-row:hover { background: #35354a; }
+.list-row.active { background: #35355a; border-left: 3px solid #5b6abf; }
+.list-row .checkbox { text-align: center; color: #5b6abf; }
+.list-row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list-row .name .icon { margin-right: 6px; }
+.list-row .artist { color: #999; font-size: 12px; }
+.list-row .status { font-size: 12px; text-align: center; }
+.status.done { color: #4caf50; }
+.status.pending { color: #ff9800; }
+.status.fail { color: #f44336; }
+.list-row .action { text-align: center; }
+.list-row .action .play-btn {
+  background: none; border: 1px solid #5b6abf; color: #5b6abf;
+  border-radius: 4px; padding: 2px 10px; font-size: 11px; cursor: pointer;
+}
+.list-row .action .play-btn:hover { background: #5b6abf; color: #fff; }
+
+.statusbar {
+  background: #252538;
+  padding: 8px 20px;
+  display: flex;
+  justify-content: space-between;
+  color: #888;
+  font-size: 12px;
+  border-top: 1px solid #3a3a52;
+  flex-shrink: 0;
+}
+
+/* 详情面板 */
+.detail-content { padding: 16px; }
+.detail-section { margin-bottom: 16px; }
+.detail-section .section-title {
+  color: #999;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #333348;
+  padding-bottom: 4px;
+}
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 13px;
+}
+.detail-row .label { color: #888; min-width: 60px; }
+.detail-row .value { color: #ddd; text-align: right; }
+.detail-row input, .detail-row select {
+  background: #1e1e32; border: 1px solid #3a3a52; border-radius: 4px;
+  padding: 4px 8px; color: #ddd; font-size: 13px; outline: none;
+  width: 180px; text-align: right;
+}
+.detail-row input:focus, .detail-row select:focus { border-color: #5b6abf; }
+.detail-row input.edited { border-color: #ff9800; background: #2a2a1e; }
+
+.detail-cover {
+  width: 160px;
+  height: 160px;
+  background: linear-gradient(135deg, #3a3a52, #2d2d3f);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-size: 36px;
+  margin: 0 auto 10px;
+  cursor: pointer;
+  position: relative;
+}
+.detail-cover:hover::after {
+  content: '点击更换封面';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.6);
+  color: #fff; font-size: 11px; text-align: center;
+  padding: 4px; border-radius: 0 0 8px 8px;
+}
+.detail-search-btn {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ff9800;
+  border-radius: 6px;
+  background: transparent;
+  color: #ff9800;
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+.detail-search-btn:hover { background: rgba(255,152,0,0.1); }
+.detail-search-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.search-result-box {
+  background: #1e1e32;
+  border: 1px solid #3a3a52;
+  border-radius: 6px;
+  padding: 10px;
+  margin-top: 8px;
+  display: none;
+}
+.search-result-box.show { display: block; }
+.search-result-box .result-header {
+  display: flex; justify-content: space-between; align-items: center;
+  color: #4caf50; font-size: 12px; margin-bottom: 6px;
+}
+.search-result-box .result-nav { display: flex; align-items: center; gap: 6px; }
+.search-result-box .nav-btn {
+  background: #3a3a52; border: none; color: #aaa;
+  width: 22px; height: 22px; border-radius: 4px;
+  font-size: 11px; cursor: pointer; display: flex;
+  align-items: center; justify-content: center;
+}
+.search-result-box .nav-btn:hover { background: #4a4a65; }
+.search-result-box .result-row {
+  display: flex; justify-content: space-between; padding: 3px 0;
+  color: #ccc; font-size: 12px;
+}
+.search-result-box .result-row .rl { color: #888; }
+.search-result-box .result-actions {
+  display: flex; gap: 6px; margin-top: 8px; justify-content: flex-end;
+}
+.search-result-box .result-actions button {
+  background: #3a3a52; border: none; color: #aaa;
+  padding: 4px 12px; border-radius: 4px; font-size: 11px; cursor: pointer;
+}
+.search-result-box .result-actions button.accept { background: #5b6abf; color: #fff; }
+
+.detail-save-btn {
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-radius: 6px;
+  background: #5b6abf;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+.detail-save-btn:hover { background: #6b7adf; }
+
+.detail-lyrics-preview {
+  font-size: 12px;
+  color: #888;
+  line-height: 1.8;
+}
+.detail-lyrics-preview .current { color: #5b6abf; font-weight: bold; }
+
+/* 标签页 */
+.window-tabs {
+  display: flex;
+  background: #1e1e32;
+  border-bottom: 1px solid #3a3a52;
+}
+.window-tabs .tab {
+  padding: 10px 24px;
+  color: #888;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.window-tabs .tab.active {
+  color: #5b6abf;
+  border-bottom-color: #5b6abf;
+  background: #2d2d3f;
+}
+.window-tabs .tab:hover { color: #ccc; }
+
+.page { display: none; }
+.page.active { display: block; }
+
+/* 设置 */
+.settings-page { padding: 24px; }
+.settings-group {
+  background: #252538;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.settings-group .group-title {
+  color: #aaa;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.provider-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #2d2d3f;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+.provider-item .drag-handle { color: #666; cursor: grab; font-size: 14px; }
+.provider-item .name { flex: 1; color: #ddd; font-size: 13px; }
+.provider-item .badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px;
+  background: #3a3a52; color: #888;
+}
+.provider-item .toggle {
+  width: 36px; height: 20px; background: #4a4a52; border-radius: 10px;
+  position: relative; cursor: pointer; flex-shrink: 0;
+}
+.provider-item .toggle.on { background: #5b6abf; }
+.provider-item .toggle::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; background: #fff; border-radius: 50%;
+  transition: 0.2s;
+}
+.provider-item .toggle.on::after { left: 18px; }
+.form-row {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
+}
+.form-row label { color: #aaa; font-size: 13px; min-width: 80px; flex-shrink: 0; }
+.form-row input, .form-row select {
+  background: #1e1e32; border: 1px solid #3a3a52; border-radius: 6px;
+  padding: 6px 12px; color: #ccc; font-size: 13px; outline: none; flex: 1;
+}
+.form-row input:focus { border-color: #5b6abf; }
+.form-row .hint { color: #666; font-size: 11px; }
+.form-row .dir-btn {
+  background: #3a3a52; border: none; color: #aaa; padding: 6px 12px;
+  border-radius: 6px; cursor: pointer; font-size: 12px;
+}
+.form-row .dir-btn:hover { background: #4a4a65; }
+
+/* 试听 */
+.audition-body { padding: 24px; display: flex; gap: 24px; }
+.audition-left { width: 260px; text-align: center; }
+.audition-right { flex: 1; }
+.album-art {
+  width: 220px; height: 220px;
+  background: linear-gradient(135deg, #3a3a52, #2d2d3f);
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  color: #666; font-size: 48px; margin: 0 auto 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.song-title { color: #eee; font-size: 16px; font-weight: 600; }
+.song-artist { color: #999; font-size: 13px; margin-top: 4px; margin-bottom: 16px; }
+.progress-row {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+}
+.progress-bar {
+  flex: 1; height: 4px; background: #3a3a52; border-radius: 2px; position: relative;
+}
+.progress-bar .fill {
+  width: 35%; height: 100%; background: linear-gradient(90deg, #5b6abf, #8b9cf7);
+  border-radius: 2px; position: relative;
+}
+.progress-bar .fill::after {
+  content: ''; width: 12px; height: 12px; background: #8b9cf7;
+  border-radius: 50%; position: absolute; right: -6px; top: -4px;
+}
+.time-label { color: #888; font-size: 12px; white-space: nowrap; }
+.controls-row {
+  display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 16px;
+}
+.ctrl-btn {
+  width: 36px; height: 36px; border-radius: 50%; border: none;
+  background: #3a3a52; color: #ccc; font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.ctrl-btn:hover { background: #4a4a65; }
+.ctrl-btn.play {
+  width: 48px; height: 48px; background: #5b6abf; color: #fff; font-size: 20px;
+}
+.ctrl-btn.play:hover { background: #6b7adf; }
+.volume-row {
+  display: flex; align-items: center; gap: 8px; justify-content: center;
+  color: #888; font-size: 12px; margin-bottom: 16px;
+}
+.volume-bar { width: 100px; height: 3px; background: #3a3a52; border-radius: 2px; }
+.volume-bar .fill { width: 70%; height: 100%; background: #888; border-radius: 2px; }
+.lyrics-group {
+  background: #1e1e32;
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid #3a3a52;
+}
+.lyrics-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px;
+}
+.lyrics-header .label { color: #aaa; font-size: 12px; }
+.lyrics-header .tools { display: flex; gap: 6px; }
+.lyrics-header .tools button {
+  background: #3a3a52; border: none; color: #aaa; padding: 3px 10px;
+  border-radius: 4px; font-size: 11px; cursor: pointer;
+}
+.lyrics-header .tools button:hover { background: #4a4a65; }
+.lyrics-header .tools button.edit { background: #5b6abf; color: #fff; }
+.lyrics-list {
+  max-height: 240px; overflow-y: auto; font-size: 13px; line-height: 2;
+}
+.lyrics-list .lyric-line {
+  padding: 2px 8px; border-radius: 4px; cursor: pointer;
+  display: flex; gap: 8px;
+}
+.lyrics-list .lyric-line .time { font-size: 11px; min-width: 50px; }
+.lyrics-list .lyric-line.past { color: #ccc; }
+.lyrics-list .lyric-line.past .time { color: #777; }
+.lyrics-list .lyric-line.current {
+  color: #fff; background: #35355a; font-weight: 600; font-size: 15px;
+}
+.lyrics-list .lyric-line.current .time { color: #8b9cf7; }
+.lyrics-list .lyric-line.future { color: #555; }
+.lyrics-list .lyric-line.future .time { color: #444; }
+.lyrics-list .lyric-line:hover { background: #2d2d3f; }
+.edit-toolbar {
+  display: flex; gap: 6px; margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid #333348; align-items: center;
+}
+.edit-toolbar button {
+  background: #3a3a52; border: none; color: #aaa; padding: 4px 12px;
+  border-radius: 4px; font-size: 11px; cursor: pointer;
+}
+.edit-toolbar button:hover { background: #4a4a65; }
+.edit-toolbar button.save { background: #4caf50; color: #fff; }
+.edit-toolbar button.save:hover { background: #5dbf61; }
+.edit-toolbar .offset-hint { color: #ff9800; font-size: 11px; }
+
+.page-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 16px; color: #ddd; font-size: 15px; font-weight: 600;
+}
+</style>
+</head>
+<body>
+
+<div class="window" id="mainWindow">
+  <div class="titlebar">
+    <span class="title">📁 AudioFileManager v1.0</span>
+    <span class="controls"><span>—</span> <span>☐</span> <span>✕</span></span>
+  </div>
+
+  <div class="window-tabs">
+    <span class="tab active" onclick="switchTab('main',this)">📂 主界面</span>
+    <span class="tab" onclick="switchTab('settings',this)">⚙ 设置</span>
+    <span class="tab" onclick="switchTab('audition',this)">🎵 试听</span>
+  </div>
+
+  <!-- ======================== 主界面 ======================== -->
+  <div class="page active" id="page-main">
+    <div class="toolbar">
+      <button class="btn">📂 选择文件夹</button>
+      <button class="btn primary">▶ 开始处理</button>
+      <button class="btn">⏹ 停止</button>
+      <div class="search">
+        <span class="icon">🔍</span>
+        <input type="text" placeholder="搜索文件名或歌手...">
+      </div>
+    </div>
+    <div class="toolbar-info">当前: E:\下载音乐\   8 个子文件夹 · 156 个音频文件 (1.2 GB)</div>
+
+    <div class="main-body">
+      <div class="file-list-panel">
+        <div class="list-header">
+          <span></span><span>文件名</span><span>歌手</span><span>状态</span><span>操作</span>
+        </div>
+        <div class="list-scroll">
+          <div class="group-header">📁 魔杰座\</div>
+          <div class="list-row active" onclick="selectRow(this)">
+            <span class="checkbox">☑</span>
+            <span class="name"><span class="icon">🎵</span>稻香</span>
+            <span class="artist">周杰伦</span>
+            <span class="status done">✅ 已处理</span>
+            <span class="action"><button class="play-btn">▶ 试听</button></span>
+          </div>
+          <div class="group-header">📁 七里香\</div>
+          <div class="list-row" onclick="selectRow(this)">
+            <span class="checkbox">☑</span>
+            <span class="name"><span class="icon">🎵</span>七里香 - 周杰伦</span>
+            <span class="artist">周杰伦</span>
+            <span class="status done">✅ 已处理</span>
+            <span class="action"><button class="play-btn">▶ 试听</button></span>
+          </div>
+          <div class="group-header">📁 依然范特西\</div>
+          <div class="list-row" onclick="selectRow(this)">
+            <span class="checkbox">☑</span>
+            <span class="name"><span class="icon">🎵</span>01_青花瓷-周杰伦</span>
+            <span class="artist">周杰伦</span>
+            <span class="status pending">⏳ 待处理</span>
+            <span class="action"><button class="play-btn">▶ 试听</button></span>
+          </div>
+          <div class="list-row" onclick="selectRow(this)">
+            <span class="checkbox">☐</span>
+            <span class="name"><span class="icon">🎵</span>[未知来源]夜曲</span>
+            <span class="artist">—</span>
+            <span class="status fail">❌ 失败</span>
+            <span class="action"><button class="play-btn">▶ 试听</button></span>
+          </div>
+          <div class="group-header">📁 (根目录)\</div>
+          <div class="list-row" onclick="selectRow(this)">
+            <span class="checkbox">☑</span>
+            <span class="name"><span class="icon">🎵</span>Some English Song</span>
+            <span class="artist">Artist Name</span>
+            <span class="status done">✅ 已处理</span>
+            <span class="action"><button class="play-btn">▶ 试听</button></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧详情面板 -->
+      <div class="detail-panel" id="detailPanel">
+        <button class="detail-toggle" onclick="toggleDetail()">◀</button>
+        <div class="detail-content">
+
+          <!-- 文件信息（只读） -->
+          <div class="detail-section">
+            <div class="section-title">📄 文件信息</div>
+            <div class="detail-row"><span class="label">文件名</span><span class="value">稻香.mp3</span></div>
+            <div class="detail-row"><span class="label">大小</span><span class="value">8.2 MB</span></div>
+            <div class="detail-row"><span class="label">时长</span><span class="value">3:43</span></div>
+            <div class="detail-row"><span class="label">格式</span><span class="value">MP3 320kbps</span></div>
+            <div class="detail-row"><span class="label">路径</span><span class="value" style="font-size:11px;color:#777;">E:\音乐库\周杰伦\魔杰座\</span></div>
+          </div>
+
+          <!-- 元数据（可编辑） -->
+          <div class="detail-section">
+            <div class="section-title">📋 元数据 <span style="color:#ff9800;font-size:10px;">（点击编辑）</span></div>
+            <div class="detail-row">
+              <span class="label">歌曲名</span>
+              <input type="text" value="稻香">
+            </div>
+            <div class="detail-row">
+              <span class="label">歌手</span>
+              <input type="text" value="周杰伦">
+            </div>
+            <div class="detail-row">
+              <span class="label">专辑</span>
+              <input type="text" value="魔杰座">
+            </div>
+            <div class="detail-row">
+              <span class="label">年份</span>
+              <input type="text" value="2008">
+            </div>
+            <div class="detail-row">
+              <span class="label">流派</span>
+              <input type="text" value="Pop">
+            </div>
+            <div class="detail-row">
+              <span class="label">曲目号</span>
+              <input type="text" value="1 / 10">
+            </div>
+          </div>
+
+          <!-- 🌐 网络搜索信息按钮 -->
+          <button class="detail-search-btn" onclick="document.querySelector('.search-result-box').classList.toggle('show')">
+            🌐 网络搜索信息
+          </button>
+          <div style="font-size:11px;color:#666;text-align:center;margin-top:4px;">
+            根据"周杰伦 × 稻香"从网络搜索填补元数据
+          </div>
+
+          <!-- 搜索结果预览（支持多条切换） -->
+          <div class="search-result-box show">
+            <div class="result-header">
+              <span>✅ 找到 3 条匹配</span>
+              <span class="result-nav">
+                <button class="nav-btn" onclick="prevResult()">◀</button>
+                <span id="resultCounter">1 / 3</span>
+                <button class="nav-btn" onclick="nextResult()">▶</button>
+                <span style="color:#888;font-size:11px;margin-left:6px;">iTunes</span>
+              </span>
+            </div>
+            <div id="resultContent">
+              <div class="result-row"><span class="rl">歌曲名</span><span>稻香</span></div>
+              <div class="result-row"><span class="rl">歌手</span><span>周杰伦</span></div>
+              <div class="result-row"><span class="rl">专辑</span><span>魔杰座</span></div>
+              <div class="result-row"><span class="rl">年份</span><span>2008</span></div>
+              <div class="result-row"><span class="rl">流派</span><span>Pop</span></div>
+              <div class="result-row"><span class="rl">封面</span><span>✅ 600×600</span></div>
+              <div class="result-row"><span class="rl">歌词</span><span>✅ LRCLIB 有匹配</span></div>
+            </div>
+            <div class="result-actions">
+              <button onclick="fillResults()" class="accept">✓ 填入元数据</button>
+              <button onclick="this.parentElement.parentElement.classList.remove('show')">✕ 关闭</button>
+            </div>
+          </div>
+
+          <!-- 封面 -->
+          <div class="detail-section">
+            <div class="section-title">🎨 封面</div>
+            <div class="detail-cover">🎵</div>
+            <div class="detail-row"><span class="label">来源</span><span class="value">iTunes Search</span></div>
+          </div>
+
+          <!-- 歌词预览 -->
+          <div class="detail-section">
+            <div class="section-title">📝 歌词（前5行）</div>
+            <div class="detail-lyrics-preview">
+              <div>[00:31.05] 在这个世界如果你有太多的抱怨</div>
+              <div>[00:34.56] 跌倒了就不敢继续往前走</div>
+              <div class="current">[00:37.81] 为什么人要这么的脆弱堕落</div>
+              <div>[00:41.39] 请你打开电视看看</div>
+              <div>[00:42.68] 多少人为生命在努力勇敢的走下去</div>
+            </div>
+          </div>
+
+          <!-- 保存按钮 -->
+          <button class="detail-save-btn" onclick="alert('元数据已保存到：稻香.mp3 的 ID3 标签')">💾 保存修改到文件</button>
+          <div style="text-align:center;margin-top:6px;font-size:11px;color:#666;">
+            修改后将写入 ID3 标签
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="statusbar">
+      <span>📊 已识别: 5/6  |  ✅ 已处理: 3/6  |  ⏳ 用时: 0:45</span>
+      <span>🔍 搜索中: 稻香 → iTunes (匹配✓)  歌词→LRCLIB</span>
+    </div>
+  </div>
+
+  <!-- ======================== 设置 ======================== -->
+  <div class="page" id="page-settings">
+    <div class="settings-page">
+      <div class="page-header">⚙️ 设置</div>
+
+      <!-- 搜索接口 -->
+      <div class="settings-group">
+        <div class="group-title">📡 搜索接口配置</div>
+        <div style="color:#888;font-size:12px;margin-bottom:10px;">拖拽 ⠿ 调整优先级顺序，开关控制启用/禁用</div>
+        <div class="provider-item">
+          <span class="drag-handle">⠿</span>
+          <span class="name">Apple iTunes Search</span>
+          <span class="badge">元数据 + 封面 + 试听</span>
+          <span class="toggle on"></span>
+        </div>
+        <div class="provider-item">
+          <span class="drag-handle">⠿</span>
+          <span class="name">LRCLIB</span>
+          <span class="badge">同步歌词</span>
+          <span class="toggle on"></span>
+        </div>
+        <div class="provider-item">
+          <span class="drag-handle">⠿</span>
+          <span class="name">MusicBrainz + Cover Art Archive</span>
+          <span class="badge">元数据 + 封面（备选）</span>
+          <span class="toggle on"></span>
+        </div>
+        <div class="provider-item">
+          <span class="drag-handle">⠿</span>
+          <span class="name">Meting-API（网易云/QQ音乐）</span>
+          <span class="badge">元数据 + 歌词（中文补充）</span>
+          <span class="toggle"></span>
+        </div>
+        <div style="margin-top:12px;padding:12px;background:#2d2d3f;border-radius:6px;">
+          <div class="form-row">
+            <label>API 地址</label>
+            <input type="text" value="https://api.injahow.cn/meting/">
+          </div>
+          <div class="form-row">
+            <label>音源服务</label>
+            <select><option>netease（网易云）</option><option>tencent（QQ音乐）</option></select>
+          </div>
+          <div style="color:#666;font-size:11px;">可用实例：api.injahow.cn / api.amarea.cn / api.crowya.com</div>
+        </div>
+        <div class="form-row" style="margin-top:12px;">
+          <label>请求超时</label>
+          <input type="text" value="10" style="width:60px;flex:none;">
+          <span style="color:#888;font-size:12px;">秒</span>
+          <span style="flex:1"></span>
+          <label>总超时</label>
+          <input type="text" value="30" style="width:60px;flex:none;">
+          <span style="color:#888;font-size:12px;">秒</span>
+        </div>
+      </div>
+
+      <!-- 目录整理 -->
+      <div class="settings-group">
+        <div class="group-title">📂 目录整理规则</div>
+        <div class="form-row">
+          <label>输出根目录</label>
+          <input type="text" value="E:\整理后的音乐库">
+          <button class="dir-btn">📁 浏览</button>
+        </div>
+        <div style="color:#666;font-size:11px;margin:-6px 0 12px 92px;">
+          整理后的文件将复制/移动到该目录下，自动按歌手 → 专辑分目录
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="checkbox" checked> <span>按歌手分目录</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="checkbox" checked> <span>按专辑分目录</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="checkbox" checked> <span>追加年份到专辑名（如 "魔杰座 (2008)"）</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="checkbox" checked> <span>无元数据归入"未知"目录</span>
+        </label>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333348;">
+          <div style="color:#ddd;font-size:13px;margin-bottom:8px;">📦 整理方式</div>
+          <label style="display:flex;align-items:center;gap:8px;padding:4px 0;color:#ccc;font-size:13px;">
+            <input type="radio" name="mode" checked> <span>复制到目标目录（保留源文件）</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding:4px 0;color:#ccc;font-size:13px;">
+            <input type="radio" name="mode"> <span>移动到目标目录（整理后删除源文件）</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- 🔤 文件名规则 -->
+      <div class="settings-group">
+        <div class="group-title">🔤 文件名规则</div>
+        <div class="form-row">
+          <label>格式模板</label>
+          <input type="text" value="{title} - {artist}">
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="checkbox" checked> <span>去除序号前缀（如 "01_"）</span>
+        </label>
+      </div>
+
+      <!-- 📑 文件名冲突处理 -->
+      <div class="settings-group">
+        <div class="group-title">📑 文件名冲突处理</div>
+        <div style="color:#888;font-size:12px;margin-bottom:10px;">整理后目标目录已存在同名文件时的处理方式</div>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="radio" name="conflictMode"> <span>保留第一个，跳过后续</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="radio" name="conflictMode"> <span>保留最后一个（后处理覆盖先处理）</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="radio" name="conflictMode" checked> <span>保留音质最好的（自动对比比特率/采样率）</span>
+        </label>
+        <div style="padding-left:22px;color:#aaa;font-size:11px;margin-bottom:6px;">
+          如 320kbps MP3 自动覆盖 128kbps，无损 FLAC 保留
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="radio" name="conflictMode"> <span>自动重命名（全部保留，添加序号后缀）</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="radio" name="conflictMode"> <span>每次询问我</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;border-top:1px solid #333348;margin-top:6px;padding-top:8px;">
+          <input type="checkbox"> <span>跳过目标目录已存在的文件（断点续传模式）</span>
+        </label>
+      </div>
+
+      <!-- 📑 内容重复检测 -->
+      <div class="settings-group">
+        <div class="group-title">📑 内容重复检测</div>
+        <div style="color:#888;font-size:12px;margin-bottom:10px;">检测内容完全相同的文件（SHA-256 哈希）。不同的音频版本不会被视为重复。</div>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="radio" name="dupMode" checked> <span>跳过（保留第一个文件）</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="radio" name="dupMode"> <span>覆盖（用新的替换旧的）</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="radio" name="dupMode"> <span>保留全部（不视为重复）</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="radio" name="dupMode"> <span>每次询问我</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;border-top:1px solid #333348;margin-top:6px;padding-top:8px;">
+          <input type="checkbox"> <span>启用文件内容哈希检测（SHA-256，精确但较慢）</span>
+        </label>
+      </div>
+
+      <!-- 💾 元数据保存方式（新增） -->
+      <div class="settings-group">
+        <div class="group-title">💾 元数据保存方式</div>
+        <div style="color:#888;font-size:12px;margin-bottom:10px;">选择元数据（歌词、封面等）的保存位置</div>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="radio" name="save_mode" checked> <span>写入文件标签（ID3/Vorbis）</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="radio" name="save_mode"> <span>保存为同目录独立文件（歌曲名.lrc + cover.jpg）</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="radio" name="save_mode"> <span>两者都保存（标签 + 独立文件）</span>
+        </label>
+      </div>
+
+      <!-- 📝 文字编码设置（新增） -->
+      <div class="settings-group">
+        <div class="group-title">📝 文字编码设置</div>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:#ccc;font-size:13px;">
+          <input type="checkbox" checked> <span>☑ 启用编码统一：将元数据文字统一转换到指定编码</span>
+        </label>
+        <div class="form-row">
+          <label>目标字符集</label>
+          <select>
+            <option selected>UTF-8（推荐）</option>
+            <option>GBK（GB2312，兼容旧播放器）</option>
+            <option>GB18030</option>
+            <option>ISO-8859-1（Latin1，兼容老旧ID3v1）</option>
+          </select>
+        </div>
+        <div style="color:#666;font-size:11px;margin-top:4px;">
+          ⚠️ 某些老旧播放器（如车载音响）可能只支持 GBK/GB18030，UTF-8 在现代播放器中兼容最佳
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn" onclick="void(0)" style="background:#3a3a52;border:none;color:#ccc;padding:8px 24px;border-radius:6px;cursor:pointer;">↺ 恢复默认</button>
+        <button class="btn primary" onclick="void(0)" style="border:none;padding:8px 24px;border-radius:6px;cursor:pointer;">💾 保存设置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================== 试听 ======================== -->
+  <div class="page" id="page-audition">
+    <div class="audition-body">
+      <div class="audition-left">
+        <div class="album-art">🎵</div>
+        <div class="song-title">稻香</div>
+        <div class="song-artist">周杰伦 · 魔杰座 (2008)</div>
+
+        <div class="progress-row">
+          <span class="time-label">0:23</span>
+          <div class="progress-bar"><div class="fill"></div></div>
+          <span class="time-label">3:43</span>
+        </div>
+
+        <div class="controls-row">
+          <button class="ctrl-btn">◀◀</button>
+          <button class="ctrl-btn play">▶</button>
+          <button class="ctrl-btn">▶▶</button>
+        </div>
+
+        <div class="volume-row">
+          <span>🔊</span>
+          <div class="volume-bar"><div class="fill"></div></div>
+        </div>
+
+        <div style="display:flex;gap:4px;justify-content:center;font-size:11px;color:#888;margin-top:8px;flex-wrap:wrap;">
+          <span>🎤 LRCLIB</span>
+          <span>|</span>
+          <span>版本 1/2</span>
+          <span>|</span>
+          <span>本地文件</span>
+        </div>
+      </div>
+
+      <div class="audition-right">
+        <div class="lyrics-group">
+          <div class="lyrics-header">
+            <span class="label">📝 歌词（点击行跳转，拖拽调时间）</span>
+            <div class="tools">
+              <button class="edit">✏️ 进入编辑</button>
+              <button>↻ 重置</button>
+              <button class="save" style="background:#4caf50;color:#fff;">💾 保存</button>
+            </div>
+          </div>
+          <div class="lyrics-list">
+            <div class="lyric-line past"><span class="time">00:31</span>在这个世界如果你有太多的抱怨</div>
+            <div class="lyric-line past"><span class="time">00:34</span>跌倒了就不敢继续往前走</div>
+            <div class="lyric-line current"><span class="time">00:37</span>为什么人要这么的脆弱堕落</div>
+            <div class="lyric-line future"><span class="time">00:41</span>请你打开电视看看</div>
+            <div class="lyric-line future"><span class="time">00:42</span>多少人为生命在努力勇敢的走下去</div>
+            <div class="lyric-line future"><span class="time">00:47</span>我们是不是该知足</div>
+            <div class="lyric-line future"><span class="time">00:50</span>珍惜一切 就算没有拥有</div>
+            <div class="lyric-line future"><span class="time">00:54</span>还记得你说家是唯一的城堡</div>
+            <div class="lyric-line future"><span class="time">00:58</span>随着稻香河流继续奔跑</div>
+            <div class="lyric-line future"><span class="time">01:02</span>微微笑 小时候的梦我知道</div>
+          </div>
+          <div class="edit-toolbar">
+            <button><< -0.5s</button>
+            <button>+0.5s >></button>
+            <span class="offset-hint">⏱ 拖拽歌词行可调整时间</span>
+            <span style="flex:1"></span>
+            <button style="color:#ff9800;">⚙ 编辑中</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// 搜索结果模拟数据（3 条候选）
+const mockResults = [
+  { source: "iTunes", title: "稻香", artist: "周杰伦", album: "魔杰座", year: "2008", genre: "Pop", cover: "✅ 600×600", lyrics: "✅ LRCLIB 有匹配" },
+  { source: "MusicBrainz", title: "稻香 (Album Version)", artist: "周杰倫", album: "魔杰座", year: "2008", genre: "Mandopop", cover: "✅ 500×500", lyrics: "✅ 有匹配" },
+  { source: "Meting-网易云", title: "稻香", artist: "周杰伦", album: "魔杰座", year: "2008", genre: "流行", cover: "✅ 640×640", lyrics: "✅ 有匹配" }
+];
+let currentResultIndex = 0;
+
+function renderResult(index) {
+  const r = mockResults[index];
+  document.getElementById('resultCounter').textContent = `${index + 1} / ${mockResults.length}`;
+  // Update source label next to nav
+  const nav = document.querySelector('.result-nav');
+  nav.querySelector('span:last-child').textContent = r.source;
+
+  const html = `
+    <div class="result-row"><span class="rl">歌曲名</span><span>${r.title}</span></div>
+    <div class="result-row"><span class="rl">歌手</span><span>${r.artist}</span></div>
+    <div class="result-row"><span class="rl">专辑</span><span>${r.album}</span></div>
+    <div class="result-row"><span class="rl">年份</span><span>${r.year}</span></div>
+    <div class="result-row"><span class="rl">流派</span><span>${r.genre}</span></div>
+    <div class="result-row"><span class="rl">封面</span><span>${r.cover}</span></div>
+    <div class="result-row"><span class="rl">歌词</span><span>${r.lyrics}</span></div>
+  `;
+  document.getElementById('resultContent').innerHTML = html;
+}
+
+function nextResult() {
+  currentResultIndex = (currentResultIndex + 1) % mockResults.length;
+  renderResult(currentResultIndex);
+}
+function prevResult() {
+  currentResultIndex = (currentResultIndex - 1 + mockResults.length) % mockResults.length;
+  renderResult(currentResultIndex);
+}
+function switchTab(name, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  el.classList.add('active');
+}
+function toggleDetail() {
+  const panel = document.getElementById('detailPanel');
+  panel.classList.toggle('collapsed');
+  panel.querySelector('.detail-toggle').textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
+}
+function selectRow(el) {
+  document.querySelectorAll('.list-row').forEach(r => r.classList.remove('active'));
+  el.classList.add('active');
+}
+function fillResults() {
+  const r = mockResults[currentResultIndex];
+  alert(`已填入第 ${currentResultIndex + 1} 条结果：${r.title} - ${r.artist}（${r.source}）\n请确认后点击「保存修改到文件」`);
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,77 @@
+{
+    "version": "3.0",
+    "logging": {
+        "enabled": true
+    },
+    "fetch_cover": true,
+    "fetch_lyrics": true,
+    "search": {
+        "provider_order": ["itunes", "lrclib", "musicbrainz", "meting"],
+        "provider_enabled": {
+            "itunes": true,
+            "lrclib": true,
+            "musicbrainz": true,
+            "meting": false
+        },
+        "meting": {
+            "api_url": "https://api.injahow.cn/meting/",
+            "server": "netease",
+            "available_instances": [
+                "https://api.injahow.cn/meting/",
+                "https://api.amarea.cn/meting/",
+                "https://api.crowya.com/meting/"
+            ]
+        },
+        "request_timeout": 10,
+        "total_timeout": 30,
+        "enabled": true
+    },
+    "network": {
+        "rate_limiter": {
+            "itunes":      {"concurrency": 2, "interval": 0.0, "max_retries": 2},
+            "lrclib":      {"concurrency": 3, "interval": 0.0, "max_retries": 3},
+            "musicbrainz": {"concurrency": 1, "interval": 1.1, "max_retries": 2},
+            "meting":      {"concurrency": 1, "interval": 0.8, "max_retries": 2}
+        },
+        "global_timeout": 30,
+        "retry_backoff_base": 2.0
+    },
+    "organize": {
+        "output_dir": "",
+        "by_artist": true,
+        "by_album": true,
+        "album_with_year": true,
+        "unknown_dir": true,
+        "delete_source": false,
+        "enabled": true
+    },
+    "filename": {
+        "enabled": true,
+        "template": "{title} - {artist}",
+        "separator": "-",
+        "strip_number_prefix": true
+    },
+    "artist_db": {
+        "sync_on_first_run": true,
+        "sync_count": 500,
+        "builtin_artists_path": "data/artist_db.json",
+        "user_data_path": "data/user_artists.json"
+    },
+    "save_mode": "tags",
+    "encoding": {
+        "enabled": false,
+        "charset": "UTF-8"
+    },
+    "duplicate": {
+        "mode": "skip",
+        "use_hash": false,
+        "hash_algorithm": "sha256"
+    },
+    "filename_conflict": {
+        "mode": "keep_best_quality",
+        "skip_existing": false,
+        "quality_priority": ["bitrate", "sample_rate", "format"]
+    },
+    "last_input_dir": "",
+    "last_output_dir": ""
+}
