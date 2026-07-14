@@ -321,6 +321,10 @@ class SettingsDialog(QDialog):
         self.combo_charset.addItems(["UTF-8", "GBK", "GB2312", "BIG5", "Shift_JIS"])
         form.addRow("目标字符集:", self.combo_charset)
 
+        self.chk_t2s = QCheckBox("启用繁体→简体转换（如 費翔 → 费翔）")
+        self.chk_t2s.setToolTip("开启后，批处理写入标签时会将繁体中文字符转为简体，使同一艺人的不同写法保持一致。")
+        form.addRow(self.chk_t2s)
+
         layout.addWidget(group)
 
         hint = QLabel(
@@ -566,6 +570,7 @@ class SettingsDialog(QDialog):
         idx = self.combo_charset.findText(charset)
         if idx >= 0:
             self.combo_charset.setCurrentIndex(idx)
+        self.chk_t2s.setChecked(encoding.get("traditional_to_simplified", False))
 
         # --- 去重 ---
         duplicate = self._config.get("duplicate", {})
@@ -701,6 +706,7 @@ class SettingsDialog(QDialog):
         encoding = cfg.setdefault("encoding", {})
         encoding["enabled"] = self.chk_encoding_enabled.isChecked()
         encoding["charset"] = self.combo_charset.currentText()
+        encoding["traditional_to_simplified"] = self.chk_t2s.isChecked()
 
         # --- 去重 ---
         duplicate = cfg.setdefault("duplicate", {})

@@ -22,6 +22,14 @@ try:
 except ImportError:  # pragma: no cover - 仅在缺少依赖时触发
     _HAS_CHARDET = False
 
+# hanziconv 为可选依赖（requirements.txt 已声明，纯 Python，无原生二进制），
+# 缺失时降级为不做繁→简转换
+try:
+    from hanziconv import HanziConv  # type: ignore
+    _HAS_HANZICONV = True
+except ImportError:  # pragma: no cover - 仅在缺少依赖时触发
+    _HAS_HANZICONV = False
+
 
 class EncodingService:
     """编码统一服务。
@@ -36,10 +44,17 @@ class EncodingService:
     - UTF-8: 现代通用标准（推荐）
     """
 
-    def __init__(self, enabled: bool, target_charset: str = "UTF-8"):
+    def __init__(
+        self,
+        enabled: bool,
+        target_charset: str = "UTF-8",
+        traditional_to_simplified: bool = False,
+    ):
         self.enabled = enabled
         # 目标字符集统一大写，便于比较与回写
         self.target = target_charset.upper()
+        # 繁体→简体转换开关（如 費翔 → 费翔），独立于字符集统一
+        self.t2s_enabled = traditional_to_simplified
 
     # ------------------------------------------------------------
     # 单文件处理
@@ -59,7 +74,7 @@ class EncodingService:
             FLAC/OGG（Vorbis Comment）/M4A（MP4Tags）的值本身就是字符串列表，
             沿用通用逻辑。
         """
-        if not self.enabled:
+        if not self.enabled and not self.t2s_enabled:
             return {}
 
         try:
@@ -117,7 +132,7 @@ class EncodingService:
             changed = False
             for original in frame.text:
                 if isinstance(original, str):
-                    converted = self._detect_and_convert(original)
+                    converted = self._normalize_text(original)
                     new_texts.append(converted)
                     if converted != original:
                         changed = True
@@ -125,7 +140,7 @@ class EncodingService:
                 elif isinstance(original, ID3TimeStamp):
                     # TDRC 等时间戳帧的 text 是 ID3TimeStamp 对象
                     s = str(original)
-                    converted = self._detect_and_convert(s)
+                    converted = self._normalize_text(s)
                     new_texts.append(ID3TimeStamp(converted))
                     if converted != s:
                         changed = True
@@ -161,7 +176,7 @@ class EncodingService:
                 original = attr.value
                 if not isinstance(original, str):
                     continue
-                converted = self._detect_and_convert(original)
+                converted = self._normalize_text(original)
                 if converted != original:
                     changes[key] = converted
                     attr.value = converted  # 就地修改属性对象
@@ -182,7 +197,7 @@ class EncodingService:
             original = value.value
             if not isinstance(original, str):
                 continue
-            converted = self._detect_and_convert(original)
+            converted = self._normalize_text(original)
             if converted != original:
                 changes[key] = converted
                 value.value = converted  # 就地修改值对象
@@ -201,7 +216,7 @@ class EncodingService:
             changed = False
             for original in texts:
                 if isinstance(original, str):
-                    converted = self._detect_and_convert(original)
+                    converted = self._normalize_text(original)
                     if converted != original:
                         changed = True
                         changes[key] = converted
@@ -227,6 +242,36 @@ class EncodingService:
         except Exception:
             # 兜底：直接整体赋值
             audio.tags[key] = new_texts
+
+    # ------------------------------------------------------------
+    # 繁体 → 简体 文本转换
+    # ------------------------------------------------------------
+    def convert_text(self, text: str) -> str:
+        """将单段元数据文本做繁→简转换（受 ``t2s_enabled`` 控制）。
+
+        供批处理在写入标签前统一艺人/标题等文本，使 費翔 与 费翔
+        等同一艺人的不同写法保持一致。缺失 hanziconv 时原样返回。
+        """
+        if not self.t2s_enabled:
+            return text
+        return self._t2s(text)
+
+    def _t2s(self, text: str) -> str:
+        """繁体中文字符转简体（如 費翔 → 费翔）。"""
+        if not _HAS_HANZICONV:
+            return text
+        try:
+            return HanziConv.toSimplified(text)
+        except Exception as e:  # pragma: no cover - 仅转换异常时触发
+            logger.warning(f"繁→简转换失败: {e}")
+            return text
+
+    def _normalize_text(self, original: str) -> str:
+        """单段文本的完整归一化：先字符集修复（如启用），再繁→简（如启用）。"""
+        text = self._detect_and_convert(original) if self.enabled else original
+        if self.t2s_enabled:
+            text = self._t2s(text)
+        return text
 
     # ------------------------------------------------------------
     # 乱码检测与修复

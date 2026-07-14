@@ -60,7 +60,8 @@
     "save_mode": "tags",
     "encoding": {
         "enabled": false,
-        "charset": "UTF-8"
+        "charset": "UTF-8",
+        "traditional_to_simplified": false
     },
     "duplicate": {
         "mode": "skip",

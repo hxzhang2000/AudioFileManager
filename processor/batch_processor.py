@@ -114,9 +114,11 @@ class BatchProcessor(QThread):
         )
 
         # —— 编码统一服务（§7.6）——
+        encoding_cfg = config.get("encoding", {})
         self.encoder = EncodingService(
-            enabled=config.get("encoding", {}).get("enabled", False),
-            target_charset=config.get("encoding", {}).get("charset", "UTF-8"),
+            enabled=encoding_cfg.get("enabled", False),
+            target_charset=encoding_cfg.get("charset", "UTF-8"),
+            traditional_to_simplified=encoding_cfg.get("traditional_to_simplified", False),
         )
 
         # —— 目录整理器（§6，延迟加载：模块可能尚未实现）——
@@ -307,13 +309,15 @@ class BatchProcessor(QThread):
         if search_enabled and not self._offline_mode:
             self._enrich_cover_and_lyrics(metadata, title, artist, album)
 
-        # —— 步骤 4：编码统一（离线，如启用）——
+        # —— 步骤 4：编码统一（离线，如启用或开启繁→简）——
         self.progress_updated.emit(index, total, "encoding", 4, total_steps)
-        if self.encoder.enabled:
+        if self.encoder.enabled or self.encoder.t2s_enabled:
             self.encoder.normalize_file(file_path)
 
         # —— 步骤 5：标签写入（离线）——
         self.progress_updated.emit(index, total, "writing", 5, total_steps)
+        # 繁→简转换（如启用）：写入前统一元数据文本，使 費翔 → 费翔 等保持一致
+        self._apply_t2s_to_metadata(metadata)
         self.saver.save_metadata_to_tags(
             file_path,
             metadata,
@@ -381,9 +385,9 @@ class BatchProcessor(QThread):
             entry.size = os.path.getsize(file_path)
         except OSError:
             pass
-        normalized = title.lower().strip() if title else ""
+        normalized = self.encoder.convert_text(title).lower().strip() if title else ""
         if artist:
-            normalized = f"{title} - {artist}".lower().strip()
+            normalized = f"{self.encoder.convert_text(title)} - {self.encoder.convert_text(artist)}".lower().strip()
         entry.name_normalized = normalized
         entry = self.duplicate_detector.check(entry)
         if not entry.is_duplicate:
@@ -441,6 +445,19 @@ class BatchProcessor(QThread):
             metadata.lyrics = None
         if not fetch_cover:
             metadata.cover_data = None
+
+    def _apply_t2s_to_metadata(self, metadata: TrackMetadata):
+        """繁→简转换（如启用）：写入标签前统一元数据的文本字段。
+
+        使 費翔 → 费翔 等同一艺人的不同写法在标签与文件名中保持一致。
+        开关关闭时 ``convert_text`` 原样返回，无副作用。
+        """
+        if not self.encoder.t2s_enabled:
+            return
+        metadata.title = self.encoder.convert_text(metadata.title)
+        metadata.artist = self.encoder.convert_text(metadata.artist)
+        if metadata.album:
+            metadata.album = self.encoder.convert_text(metadata.album)
 
     def _rename_file(self, file_path: str, metadata: TrackMetadata) -> str:
         """按模板重命名文件（§6.3）；失败时返回原路径。"""

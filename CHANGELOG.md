@@ -3,6 +3,12 @@
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式，
 版本号遵循 [语义化版本控制 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [1.0.13] - 2026-07-14
+
+### Added
+
+- **繁体→简体转换开关**：「设置 → 编码」标签页新增「启用繁体→简体转换（如 費翔 → 费翔）」勾选框，对应 `encoding.traditional_to_simplified`（默认 `false`）。开启后，批处理在写入标签前（以及编码统一步骤中）将元数据文本中的繁体中文字符转为简体，使同一艺人的不同写法（如 費翔 / 费翔）在标签与去重中保持一致；去重归一化键也走同一转换。依赖 `hanziconv`（纯 Python，已加入 `requirements.txt`），缺失时自动降级为不转换。
+
 ## [1.0.12] - 2026-07-14
 
 ### Added
