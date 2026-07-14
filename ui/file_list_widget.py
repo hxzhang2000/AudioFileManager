@@ -356,6 +356,37 @@ class FileListWidget(QWidget):
                     status_item.setForeground(color)
                 return
 
+    def update_file_metadata(self, file_path: str, metadata: dict):
+        """更新列表中某文件的歌手/标题/专辑列。
+
+        批处理完成后，用已解析的元数据刷新显示。
+        仅当新值非空时才覆盖，避免网络搜索无结果时清空原有列内容。
+
+        Args:
+            file_path: 文件完整路径。
+            metadata: 含 ``artist`` / ``title`` / ``album`` 等键的字典。
+        """
+        target = os.path.normpath(file_path)
+        for row in range(self._table.rowCount()):
+            item = self._table.item(row, self._COL_NAME)
+            if item and item.data(self._PATH_ROLE) == target:
+                val = metadata.get("artist") or ""
+                if val:
+                    artist_item = self._table.item(row, self._COL_ARTIST)
+                    if artist_item:
+                        artist_item.setText(val)
+                val = metadata.get("title") or ""
+                if val:
+                    title_item = self._table.item(row, self._COL_TITLE)
+                    if title_item:
+                        title_item.setText(val)
+                val = metadata.get("album") or ""
+                if val:
+                    album_item = self._table.item(row, self._COL_ALBUM)
+                    if album_item:
+                        album_item.setText(val)
+                return
+
     def get_selected_file(self) -> Optional[str]:
         """返回当前选中（第一行）的文件路径，无选中则返回 ``None``。"""
         rows = self._table.selectionModel().selectedRows()

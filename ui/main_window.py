@@ -431,7 +431,11 @@ class MainWindow(QMainWindow):
                 lyrics_text=lyrics,
             )
             search_engine = self._get_search_engine()
-            dialog = AuditionDialog(file_path, track, self, search_engine=search_engine)
+            from config.settings import get_config
+            save_mode = get_config().get("save_mode", "tags")
+            dialog = AuditionDialog(file_path, track, self,
+                                    search_engine=search_engine,
+                                    save_mode=save_mode)
             self._audition_dialog = dialog
             # 弹窗销毁时清空引用，防止 GC 悬空引用
             dialog.destroyed.connect(lambda: setattr(self, '_audition_dialog', None))
@@ -475,6 +479,7 @@ class MainWindow(QMainWindow):
         self._batch.batch_finished.connect(self._on_batch_finished)
         self._batch.error_occurred.connect(self._on_batch_error)
         self._batch.pause_state_changed.connect(self.progress_widget.set_paused)
+        self._batch.file_metadata_updated.connect(self._on_batch_file_metadata_updated)
 
         # 切换 UI 为运行态
         self.progress_widget.reset()
@@ -551,6 +556,24 @@ class MainWindow(QMainWindow):
                         batch_files[i] = new_path
                         break
 
+    def _on_batch_file_metadata_updated(self, file_path: str, metadata: dict):
+        """单文件元数据更新：同步到文件列表与详情面板（若当前显示该文件）。"""
+        self.file_list.update_file_metadata(file_path, metadata)
+        # 如果详情面板当前显示的是该文件，同步更新
+        if self.detail_panel.get_file_path() == file_path:
+            meta = {
+                "file_path": file_path,
+                "title": metadata.get("title") or "",
+                "artist": metadata.get("artist") or "",
+                "album": metadata.get("album") or "",
+                "year": metadata.get("release_year"),
+                "genre": metadata.get("genre") or "",
+                "track_number": metadata.get("track_number"),
+                "cover_data": metadata.get("cover_data"),
+                "lyrics_text": metadata.get("lyrics_text") or "",
+            }
+            self.detail_panel.set_metadata(meta)
+
     def _on_batch_finished(self, success_count: int, failed_count: int):
         """批处理全部完成：复位 UI、清理线程引用。"""
         total = success_count + failed_count
@@ -585,9 +608,13 @@ class MainWindow(QMainWindow):
         self.progress_widget.log_message(f"手动搜索：{artist} - {title}")
 
         try:
+            from processor.batch_processor import BatchProcessor
             from services.manual_search import ManualSearchService
 
-            service = ManualSearchService(engine)
+            service = ManualSearchService(
+                engine,
+                similarity_fn=BatchProcessor._title_similarity,
+            )
 
             # 用独立 QThread worker 执行同步搜索，避免阻塞 UI
             # _SearchWorker 定义在本模块末尾（信号需在类层级注册）
@@ -653,6 +680,8 @@ class MainWindow(QMainWindow):
                 release_year=year,
                 genre=metadata.get("genre") or None,
                 track_number=track_num,
+                cover_data=metadata.get("cover_data"),
+                lyrics_text=metadata.get("lyrics_text"),
             )
 
             config = get_config()
@@ -665,6 +694,30 @@ class MainWindow(QMainWindow):
                 cover_data=metadata.get("cover_data"),
                 lyrics_text=metadata.get("lyrics_text"),
             )
+
+            # 同步更新主页面文件列表与详情面板
+            self.file_list.update_file_metadata(file_path, {
+                "title": track.title,
+                "artist": track.artist,
+                "album": track.album,
+                "release_year": track.release_year,
+                "genre": track.genre,
+                "track_number": track.track_number,
+                "cover_data": track.cover_data,
+                "lyrics_text": track.lyrics_text,
+            })
+            if self.detail_panel.get_file_path() == file_path:
+                self.detail_panel.set_metadata({
+                    "file_path": file_path,
+                    "title": track.title,
+                    "artist": track.artist,
+                    "album": track.album,
+                    "year": track.release_year,
+                    "genre": track.genre,
+                    "track_number": track.track_number,
+                    "cover_data": track.cover_data,
+                    "lyrics_text": track.lyrics_text,
+                })
 
             name = os.path.basename(file_path)
             self._status.showMessage(f"已保存：{name}", 4000)

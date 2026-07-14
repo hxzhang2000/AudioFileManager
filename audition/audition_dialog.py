@@ -115,11 +115,13 @@ class AuditionDialog(QDialog):
         parent: 父窗口。
     """
 
-    def __init__(self, file_path: str, metadata=None, parent=None, search_engine=None):
+    def __init__(self, file_path: str, metadata=None, parent=None, search_engine=None,
+                 save_mode: str = "tags"):
         super().__init__(parent)
         self.file_path = file_path
         self.metadata = metadata
         self._search_engine = search_engine
+        self._save_mode = save_mode  # "tags" / "files" / "both"
         # 编辑模式标志
         self._is_editing = False
         # 歌词多版本（搜索后可切换）
@@ -151,9 +153,13 @@ class AuditionDialog(QDialog):
         self.player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(0.8)
 
-        # 设置播放源（本地文件）
+        # 设置播放源（本地文件）—— 延迟加载，避免 QMediaPlayer 初始化媒体
+        # 管道时阻塞 UI。Windows Media Foundation 遇到内嵌封面
+        #（APIC/mjpeg 视频流）会同步初始化视频解码，延迟到弹窗就绪后再加载
+        # 可防止弹窗卡死。
         if file_path and os.path.exists(file_path):
-            self.player.setSource(self._to_url(file_path))
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self.player.setSource(self._to_url(file_path)))
 
         # 构建 UI
         self._build_ui()
@@ -701,14 +707,18 @@ class AuditionDialog(QDialog):
         worker = self._lyrics_worker
         if worker is None:
             return
-        if worker.isRunning():
-            worker.request_stop()
-            # 断开结果回调，避免关闭后弹窗已隐藏仍触发回调弹出消息框
-            try:
-                worker.finished_search.disconnect(self._on_lyrics_search_done)
-            except (TypeError, RuntimeError):
-                pass
-            worker.wait(2000)
+        try:
+            if worker.isRunning():
+                worker.request_stop()
+                # 断开结果回调，避免关闭后弹窗已隐藏仍触发回调弹出消息框
+                try:
+                    worker.finished_search.disconnect(self._on_lyrics_search_done)
+                except (TypeError, RuntimeError):
+                    pass
+                worker.wait(2000)
+        except RuntimeError:
+            # worker 已在别处 deleteLater（自然结束），C++ 对象已销毁
+            pass
         self._lyrics_worker = None
 
     def _search_lyrics(self):
@@ -777,37 +787,50 @@ class AuditionDialog(QDialog):
     def _save_to_file(self):
         """将编辑后的歌词保存到音频文件标签 + 同目录 LRC 文件。
 
-        保存方式：
-        1. 调用 ``services.tag_writer.write_lyrics`` 写入文件标签
-           （支持 MP3/FLAC/M4A/OGG/WMA/APE）。
-        2. 生成同目录 ``.lrc`` 文件（UTF-8 编码）。
+        保存方式遵循配置中的 ``save_mode``：
+        - ``"tags"``：仅写入文件标签（ID3 USLT / Vorbis Comment）
+        - ``"files"``：仅保存同目录 ``.lrc`` 独立文件
+        - ``"both"``：两者都保存
+
+        注意：写入标签前先停止播放器，避免 Windows 上 QMediaPlayer
+        加载的文件被外部修改后，关闭弹窗时 Media Foundation 管道
+        因状态不一致而崩溃（v1.0.14 hotfix）。
         """
         if not self.lyrics_ctrl.lines:
             QMessageBox.warning(self, "提示", "没有歌词可保存")
             return
 
+        # 保存前停止播放器，释放文件句柄，防止后续修改文件时
+        # Windows Media Foundation 管道状态不一致导致崩溃
+        self.player.stop()
+
         lrc_text = format_lrc(self.lyrics_ctrl.lines)
+        parts: list[str] = []
+        mode = self._save_mode  # "tags" / "files" / "both"
 
-        # 1. 写入文件标签（多格式路由）
-        tag_ok = False
-        try:
-            from services.tag_writer import write_lyrics
-            write_lyrics(self.file_path, lrc_text)
-            tag_ok = True
-        except Exception as e:
-            logger.warning(f"标签写入失败: {e}")
-            QMessageBox.warning(self, "写入失败", f"标签写入失败: {e}")
-
-        # 2. 生成同目录 LRC 文件
-        lrc_path = os.path.splitext(self.file_path)[0] + ".lrc"
-        lrc_ok = save_lrc(lrc_path, self.lyrics_ctrl.lines)
-
-        if tag_ok or lrc_ok:
-            parts = []
-            if tag_ok:
+        # 写入文件标签
+        if mode in ("tags", "both"):
+            try:
+                from services.tag_writer import write_lyrics
+                write_lyrics(self.file_path, lrc_text)
                 parts.append("文件标签")
-            if lrc_ok:
+            except Exception as e:
+                logger.warning(f"标签写入失败: {e}")
+                QMessageBox.warning(self, "写入失败", f"标签写入失败: {e}")
+
+        # 保存同目录 LRC 独立文件
+        if mode in ("files", "both"):
+            lrc_path = os.path.splitext(self.file_path)[0] + ".lrc"
+            if save_lrc(lrc_path, self.lyrics_ctrl.lines):
                 parts.append(lrc_path)
+            else:
+                logger.warning(f"LRC 文件写入失败: {lrc_path}")
+
+        # 重新加载已修改的源文件，使播放器识别最新的标签变化
+        if os.path.exists(self.file_path):
+            self.player.setSource(self._to_url(self.file_path))
+
+        if parts:
             QMessageBox.information(
                 self, "保存成功", "歌词已保存到:\n" + "\n".join(parts)
             )
