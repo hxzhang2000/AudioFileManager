@@ -132,6 +132,7 @@ class FileOrganizer:
         config: Optional[dict] = None,
         target_filename: Optional[str] = None,
         original_path: Optional[str] = None,
+        overwrite_existing: bool = False,
     ) -> str:
         """将文件整理到目标目录结构中（§6.1 / §6.2）。
 
@@ -145,6 +146,9 @@ class FileOrganizer:
                 支持字段：``output_dir`` / ``by_artist`` / ``by_album`` /
                 ``album_with_year`` / ``unknown_dir`` / ``delete_source``。
             target_filename: 目标文件名（不含目录）。为 ``None`` 时保留源文件名。
+            overwrite_existing: 为 ``True`` 时跳过冲突保护，直接覆盖已存在的
+                目标文件。由上层 ``ConflictResolver`` 决策后传入（例如
+                ``keep_best_quality`` 模式判定新文件音质更优时）。
 
         Returns:
             最终的目标音频文件完整路径（伴随的 .lrc / 封面图也已迁移）。
@@ -163,7 +167,16 @@ class FileOrganizer:
         target_path = Path(target_dir) / name
 
         # 3. 目标目录内同名冲突保护（避免覆盖已有文件）
-        target_path = self._resolve_target_conflict(src, target_path)
+        if overwrite_existing:
+            # 覆盖模式：由 ConflictResolver 判定新文件应覆盖现有文件，
+            # 先删除旧文件，再跳过 _resolve_target_conflict 避免附加后缀
+            if target_path.exists():
+                try:
+                    target_path.unlink()
+                except OSError as e:
+                    logger.warning(f"删除旧文件失败 {target_path}: {e}")
+        else:
+            target_path = self._resolve_target_conflict(src, target_path)
 
         # 4. 复制或移动
         delete_source = bool(org_config.get("delete_source", False))

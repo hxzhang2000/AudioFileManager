@@ -16,6 +16,7 @@
 同步阻塞不卡 GUI 主线程。
 """
 
+import difflib
 import os
 import threading
 import logging
@@ -76,6 +77,9 @@ class BatchProcessor(QThread):
     error_occurred = pyqtSignal(str)
     # 暂停状态变化信号：paused(True=已暂停, False=已继续)
     pause_state_changed = pyqtSignal(bool)
+    # 单文件元数据更新信号：(file_path, metadata_dict)
+    # 文件处理完毕后发射，用于 UI 同步歌手/标题/专辑等列
+    file_metadata_updated = pyqtSignal(str, object)
 
     # 子步骤名称列表（§10.7.5），共 6 步
     _SUB_STEPS = ["parsing", "searching", "enriching", "encoding", "writing", "organizing"]
@@ -326,6 +330,7 @@ class BatchProcessor(QThread):
             Exception: 处理过程中的任何异常（由 run() 捕获并标记为 failed）。
         """
         total_steps = len(self._SUB_STEPS)  # 6
+        original_file_path = file_path  # 保留原始路径，后续重命名/整理会改变 file_path
 
         # —— 步骤 1：文件名解析 + 重复检测（离线）——
         self.progress_updated.emit(index, total, "parsing", 1, total_steps)
@@ -380,6 +385,20 @@ class BatchProcessor(QThread):
                 self._organize_file(file_path, metadata, original_path=original_path)
                 or file_path
             )
+
+        # —— 发射元数据更新信号，通知 UI 同步歌手/标题/专辑等列 ——
+        # 使用原始路径（文件列表中的 _PATH_ROLE 尚未更新，原始路径才能查找到）
+        meta_dict = {
+            "title": metadata.title,
+            "artist": metadata.artist,
+            "album": metadata.album,
+            "release_year": metadata.release_year,
+            "genre": metadata.genre,
+            "track_number": metadata.track_number,
+            "cover_data": metadata.cover_data,
+            "lyrics_text": metadata.lyrics_text or metadata.lyrics,
+        }
+        self.file_metadata_updated.emit(original_file_path, meta_dict)
 
         return file_path, f"已处理: {metadata.title} - {metadata.artist}"
 
@@ -448,10 +467,17 @@ class BatchProcessor(QThread):
             )
 
     def _search_metadata(self, title: str, artist: str, album: str) -> TrackMetadata:
-        """执行元数据搜索，失败时返回基于文件名的空 TrackMetadata。"""
+        """执行元数据搜索，失败时返回基于文件名的空 TrackMetadata。
+
+        搜索时携带 ``_title_similarity`` 作为校验函数——各 Provider 依次尝试，
+        首个返回高相似度（≥35%）结果的直接采用；全部低分时自动选用得分最高者。
+        """
         metadata: Optional[TrackMetadata] = None
         if not self._offline_mode:
-            metadata = self.engine.search_metadata(title, artist or "")
+            metadata = self.engine.search_metadata(
+                title, artist or "",
+                similarity_fn=self._title_similarity,
+            )
 
         if metadata is None:
             metadata = TrackMetadata(title=title, artist=artist or "未知艺人")
@@ -485,6 +511,19 @@ class BatchProcessor(QThread):
             metadata.lyrics = None
         if not fetch_cover:
             metadata.cover_data = None
+
+    @staticmethod
+    def _title_similarity(a: str, b: str) -> float:
+        """计算两个标题的字符级相似度（0~1）。
+
+        使用 ``difflib.SequenceMatcher`` 在字符级别比较，对中文标题有效：
+        「其实很寂寞」vs「没的话说」→ 低分（<0.2）；
+        「其实很寂寞」vs「其实很寂寞 (Live)」→ 中高分（>0.6）。
+        空字符串与任何字符串的相似度定义为 0。
+        """
+        if not a or not b:
+            return 0.0
+        return difflib.SequenceMatcher(None, a.strip(), b.strip()).ratio()
 
     def _apply_t2s_to_metadata(self, metadata: TrackMetadata):
         """繁→简转换（如启用）：写入标签前统一元数据的文本字段。
@@ -549,6 +588,7 @@ class BatchProcessor(QThread):
             return
 
         # —— 冲突检测（§10.5.2）：推断目标路径，检查是否存在同名文件 ——
+        overwrite_existing = False
         try:
             target_dir = self.organizer.predict_target_path(metadata, organize_config)
             target_filename = Path(file_path).name
@@ -564,14 +604,21 @@ class BatchProcessor(QThread):
                         existing_file=str(target_path),
                     )
                     if action == "skip":
-                        logger.info(
+                        # file_organizer 输出明确的跳过日志
+                        from processor.file_organizer import logger as org_logger
+                        org_logger.info(
+                            f"跳过整理: {Path(file_path).name} - {reason}"
+                        )
+                        # 抛异常让 run() 捕获并发射 "skipped" 状态，
+                        # 使 UI 日志正确显示 "已跳过" 而非 "完成"
+                        raise DuplicateFileException(
                             f"文件名冲突解决: 跳过 {Path(file_path).name} - {reason}"
                         )
-                        return
                     elif action == "overwrite":
                         logger.info(
                             f"文件名冲突解决: 覆盖 {Path(file_path).name} - {reason}"
                         )
+                        overwrite_existing = True
                     elif action == "rename_new":
                         logger.info(
                             f"文件名冲突解决: 重命名 {Path(file_path).name} - {reason}"
@@ -584,13 +631,12 @@ class BatchProcessor(QThread):
             except OSError:
                 pass  # resolve 失败时跳过冲突检测，继续正常整理
 
-        # FileOrganizer.organize 接口：
-        #   organize(file_path, metadata, organize_config)
-        #   - file_path: 源文件路径
-        #   - metadata: TrackMetadata（含歌手/专辑/年份，用于确定目标目录）
-        #   - organize_config: organize 配置段（output_dir / by_artist / delete_source 等）
         return self.organizer.organize(
-            file_path, metadata, organize_config, original_path=original_path
+            file_path,
+            metadata,
+            organize_config,
+            original_path=original_path,
+            overwrite_existing=overwrite_existing,
         )
 
     # ============================================================
