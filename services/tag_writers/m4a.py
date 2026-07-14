@@ -28,6 +28,7 @@ def write(file_path, meta, cover_data, lyrics_text):
     if cover_data:
         audio["covr"] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
     audio.save()
+    del audio
 
 
 def write_cover(file_path, cover_data):
@@ -37,6 +38,7 @@ def write_cover(file_path, cover_data):
         audio.add_tags()
     audio["covr"] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
     audio.save()
+    del audio
 
 
 def write_lyrics(file_path, lyrics_text):
@@ -46,6 +48,7 @@ def write_lyrics(file_path, lyrics_text):
         audio.add_tags()
     audio["\xa9lyr"] = lyrics_text
     audio.save()
+    del audio
 
 
 def read_metadata(file_path) -> dict[str, Any]:
@@ -68,6 +71,7 @@ def read_metadata(file_path) -> dict[str, Any]:
         except (IndexError, ValueError, TypeError):
             track_num = None
     year_str = str(year_raw).strip()[:4] if year_raw else ""
+    del audio
     return {
         "title": str(_get("\xa9nam") or ""),
         "artist": str(_get("\xa9ART") or ""),
@@ -86,7 +90,9 @@ def read_cover(file_path) -> Optional[bytes]:
     if not covr:
         return None
     first = covr[0]
-    return bytes(first) if first is not None else None
+    result = bytes(first) if first is not None else None
+    del audio
+    return result
 
 
 def read_lyrics(file_path) -> Optional[str]:
@@ -95,5 +101,8 @@ def read_lyrics(file_path) -> Optional[str]:
     audio = MP4(file_path)
     v = audio.get("\xa9lyr")
     if not v:
+        del audio
         return None
-    return v[0] if isinstance(v, (list, tuple)) else str(v)
+    result = v[0] if isinstance(v, (list, tuple)) else str(v)
+    del audio
+    return result

@@ -34,6 +34,7 @@ def write(file_path, meta, cover_data, lyrics_text):
             audio.add_picture(p)
         audio.add_picture(pic)
     audio.save()
+    del audio
 
 
 def write_cover(file_path, cover_data):
@@ -52,6 +53,7 @@ def write_cover(file_path, cover_data):
         audio.add_picture(p)
     audio.add_picture(pic)
     audio.save()
+    del audio
 
 
 def write_lyrics(file_path, lyrics_text):
@@ -61,6 +63,7 @@ def write_lyrics(file_path, lyrics_text):
         audio.add_tags()
     audio["LYRICS"] = lyrics_text
     audio.save()
+    del audio
 
 
 def read_metadata(file_path) -> dict[str, Any]:
@@ -83,6 +86,7 @@ def read_metadata(file_path) -> dict[str, Any]:
         except (ValueError, TypeError):
             track_num = None
     year_str = str(year_raw).strip()[:4] if year_raw else ""
+    del audio
     return {
         "title": str(_get("TITLE") or ""),
         "artist": str(_get("ARTIST") or ""),
@@ -100,9 +104,11 @@ def read_cover(file_path) -> Optional[bytes]:
     fallback = None
     for pic in audio.pictures:
         if pic.type == 3:
+            del audio
             return pic.data
         if fallback is None:
             fallback = pic.data
+    del audio
     return fallback
 
 
@@ -112,5 +118,8 @@ def read_lyrics(file_path) -> Optional[str]:
     audio = FLAC(file_path)
     v = audio.get("LYRICS")
     if not v:
+        del audio
         return None
-    return v[0] if isinstance(v, (list, tuple)) else str(v)
+    result = v[0] if isinstance(v, (list, tuple)) else str(v)
+    del audio
+    return result

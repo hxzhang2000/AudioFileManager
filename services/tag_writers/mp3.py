@@ -21,7 +21,7 @@ def replace_front_cover(audio, cover_data):
     audio.tags.delall("APIC")
     for f in existing:
         audio.tags.add(f)
-    audio.tags.add(APIC(
+        audio.tags.add(APIC(
         encoding=Encoding.UTF8, mime="image/jpeg", type=3,
         desc="Cover", data=cover_data,
     ))
@@ -64,6 +64,7 @@ def write(file_path, meta, cover_data, lyrics_text):
     if lyrics_text:
         replace_lyrics(audio, lyrics_text)
     audio.save(v2_version=4)
+    del audio
 
 
 def write_cover(file_path, cover_data):
@@ -72,6 +73,7 @@ def write_cover(file_path, cover_data):
     audio = MP3(file_path, ID3=ID3)
     replace_front_cover(audio, cover_data)
     audio.save(v2_version=4)
+    del audio
 
 
 def write_lyrics(file_path, lyrics_text):
@@ -80,6 +82,7 @@ def write_lyrics(file_path, lyrics_text):
     audio = MP3(file_path, ID3=ID3)
     replace_lyrics(audio, lyrics_text)
     audio.save(v2_version=4)
+    del audio
 
 
 def read_metadata(file_path) -> dict[str, Any]:
@@ -107,6 +110,7 @@ def read_metadata(file_path) -> dict[str, Any]:
         except (ValueError, TypeError):
             track_num = None
     year_str = str(year_raw).strip()[:4] if year_raw else ""
+    del audio
     return {
         "title": str(_first("TIT2") or ""),
         "artist": str(_first("TPE1") or ""),
@@ -127,9 +131,11 @@ def read_cover(file_path) -> Optional[bytes]:
     for frame in tags.values():
         if isinstance(frame, APIC):
             if frame.type == 3:
+                del audio
                 return frame.data
             if fallback is None:
                 fallback = frame.data
+    del audio
     return fallback
 
 
@@ -141,5 +147,8 @@ def read_lyrics(file_path) -> Optional[str]:
     tags = audio.tags or {}
     for frame in tags.values():
         if isinstance(frame, USLT):
-            return frame.text or None
+            text = frame.text or None
+            del audio
+            return text
+    del audio
     return None
