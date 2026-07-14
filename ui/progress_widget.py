@@ -25,6 +25,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import time
 from typing import Optional
 
 from PyQt6.QtCore import pyqtSignal
@@ -53,6 +55,30 @@ _STEP_TEXT = {
     "skipped": "已跳过",
 }
 
+# 总进度条基础文本格式（%v=当前 %m=总数 %p=百分比），ETA 文本追加其后
+_BASE_FORMAT = "总进度 %v / %m  (%p%)"
+
+
+def _format_duration(seconds: float) -> str:
+    """将秒数格式化为中文时长字符串（如 ``"2 分 05 秒"``）。
+
+    Args:
+        seconds: 时长（秒），可为负数或无穷大（返回占位符）。
+
+    Returns:
+        中文时长字符串；非法输入返回 ``"—"``。
+    """
+    if not math.isfinite(seconds) or seconds < 0:
+        return "—"
+    total = int(round(seconds))
+    if total < 60:
+        return f"{total} 秒"
+    minutes, secs = divmod(total, 60)
+    if minutes < 60:
+        return f"{minutes} 分 {secs:02d} 秒"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} 时 {minutes:02d} 分"
+
 
 class ProgressWidget(QWidget):
     """批处理进度显示组件（§8A.4）。"""
@@ -73,6 +99,7 @@ class ProgressWidget(QWidget):
         self.setMinimumHeight(160)
 
         self._running = False
+        self._start_time = None  # ETA 计时起点（每个批次重置）
 
         self._setup_ui()
         self.set_running(False)
@@ -163,9 +190,12 @@ class ProgressWidget(QWidget):
         # 总进度：以「已完成数」计，current 是从 0 起的索引，
         # 显示为 current+1 / total，避免初始显示 0/0
         if total > 0:
+            # 剩余预估时长（ETA）追加到进度条文本之后
+            self._total_bar.setFormat(f"{_BASE_FORMAT}  ·  {self._compute_eta(current, total)}")
             self._total_bar.setMaximum(total)
             self._total_bar.setValue(current + 1)
         else:
+            self._total_bar.setFormat(_BASE_FORMAT)
             self._total_bar.setMaximum(0)  # 忙碌态
             self._total_bar.setValue(0)
 
@@ -178,6 +208,31 @@ class ProgressWidget(QWidget):
             self._step_bar.setValue(percent)
         else:
             self._step_bar.setValue(0)
+
+    def _compute_eta(self, current: int, total: int) -> str:
+        """根据已用时间与当前进度估算剩余时长。
+
+        以「已完成/进行中的文件数」为基准估算单文件平均耗时，
+        再乘以剩余文件数。开局（< 2 个文件或 < 1 秒）数据不足时返回
+        「计算中…」，避免抖动。
+
+        Args:
+            current: 当前文件索引（从 0 起）。
+            total: 文件总数。
+
+        Returns:
+            形如 ``"预计剩余 2 分 05 秒"`` 或 ``"预计剩余 计算中…"``。
+        """
+        done = current + 1  # 已处理/处理中的文件数（含当前）
+        if self._start_time is None:
+            self._start_time = time.monotonic()
+        elapsed = time.monotonic() - self._start_time
+        # 至少累计 2 个文件、经过 1 秒后再给出估计，避免开局抖动
+        if done < 2 or elapsed < 1.0:
+            return "预计剩余 计算中…"
+        avg_per_file = elapsed / done
+        remaining = max(total - done, 0)
+        return f"预计剩余 {_format_duration(avg_per_file * remaining)}"
 
     def set_current_file(self, file_path: str):
         """设置当前正在处理的文件名显示。
@@ -233,8 +288,11 @@ class ProgressWidget(QWidget):
         self._btn_stop.setEnabled(running)
         if running:
             self._btn_start.setText("运行中…")
+            self._start_time = None  # 新批次重新计时
+            self._total_bar.setFormat(_BASE_FORMAT)
         else:
             self._btn_start.setText("开始")
+            self._total_bar.setFormat(_BASE_FORMAT)
 
     def is_running(self) -> bool:
         """返回当前是否处于运行态。"""
@@ -242,8 +300,10 @@ class ProgressWidget(QWidget):
 
     def reset(self):
         """重置进度显示（清空进度条与当前文件标签，保留日志）。"""
+        self._start_time = None  # 重置 ETA 计时
         self._total_bar.setValue(0)
         self._total_bar.setMaximum(0)
+        self._total_bar.setFormat(_BASE_FORMAT)
         self._step_bar.setValue(0)
         self._lbl_current.setText("当前文件: —")
         self._lbl_current.setToolTip("")
