@@ -109,6 +109,7 @@ class EncodingService:
             except Exception as e:
                 logger.warning(f"编码统一：回写失败 {file_path}: {e}")
                 changes["_error"] = "回写失败"
+        del audio
         return changes
 
     # ------------------------------------------------------------

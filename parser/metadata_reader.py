@@ -129,6 +129,7 @@ def _read_mp3(file_path: str) -> dict:
         meta["year"] = _id3_get(tags, "TDRC") or _id3_get(tags, "TYER")
         meta["genre"] = _id3_get(tags, "TCON")
         meta["track_number"] = _id3_get(tags, "TRCK")
+    del audio
     return meta
 
 
@@ -144,6 +145,7 @@ def _read_flac(file_path: str) -> dict:
     meta["year"] = _vc_get(audio, "DATE") or _vc_get(audio, "YEAR")
     meta["genre"] = _vc_get(audio, "GENRE")
     meta["track_number"] = _vc_get(audio, "TRACKNUMBER") or _vc_get(audio, "TRACK")
+    del audio
     return meta
 
 
@@ -163,7 +165,8 @@ def _read_m4a(file_path: str) -> dict:
     if trkn:
         track = _first(trkn)
         if track and track[0]:
-            meta["track_number"] = str(track[0])
+                meta["track_number"] = str(track[0])
+    del audio
     return meta
 
 
@@ -179,7 +182,9 @@ def _read_ogg(file_path: str) -> dict:
     meta["year"] = _vc_get(audio, "DATE") or _vc_get(audio, "YEAR")
     meta["genre"] = _vc_get(audio, "GENRE")
     meta["track_number"] = _vc_get(audio, "TRACKNUMBER") or _vc_get(audio, "TRACK")
+    del audio
     return meta
+
 
 
 def _read_wma(file_path: str) -> dict:
@@ -194,6 +199,7 @@ def _read_wma(file_path: str) -> dict:
     meta["year"] = _asf_get(audio, "WM/Year")
     meta["genre"] = _asf_get(audio, "WM/Genre")
     meta["track_number"] = _asf_get(audio, "WM/TrackNumber")
+    del audio
     return meta
 
 
@@ -210,6 +216,7 @@ def _read_ape(file_path: str) -> dict:
     meta["year"] = _ape_get(audio, "Year")
     meta["genre"] = _ape_get(audio, "Genre")
     meta["track_number"] = _ape_get(audio, "Track")
+    del audio
     return meta
 
 
@@ -225,7 +232,10 @@ def _cover_mp3(file_path: str) -> Optional[bytes]:
     if tags:
         for key in tags:
             if key.startswith("APIC"):
-                return tags[key].data
+                data = tags[key].data
+                del audio
+                return data
+    del audio
     return None
 
 
@@ -235,10 +245,15 @@ def _cover_flac(file_path: str) -> Optional[bytes]:
     audio = FLAC(file_path)
     for pic in audio.pictures:
         if pic.type == 3:  # front cover
-            return pic.data
+            data = pic.data
+            del audio
+            return data
     # 无 front cover 时取第一张图
     if audio.pictures:
-        return audio.pictures[0].data
+        data = audio.pictures[0].data
+        del audio
+        return data
+    del audio
     return None
 
 
@@ -248,7 +263,10 @@ def _cover_m4a(file_path: str) -> Optional[bytes]:
     audio = MP4(file_path)
     covr = audio.get("covr")
     if covr:
-        return covr[0]
+        result = covr[0]
+        del audio
+        return result
+    del audio
     return None
 
 
@@ -261,7 +279,10 @@ def _cover_ogg(file_path: str) -> Optional[bytes]:
     pics = audio.get("METADATA_BLOCK_PICTURE", [])
     if pics:
         pic = Picture(base64.b64decode(pics[0]))
-        return pic.data
+        data = pic.data
+        del audio
+        return data
+    del audio
     return None
 
 
@@ -284,7 +305,9 @@ def _cover_ape(file_path: str) -> Optional[bytes]:
             null_pos = data.find(b"\x00")
             if null_pos >= 0:
                 data = data[null_pos + 1:]
+            del audio
             return data
+    del audio
     return None
 
 
@@ -300,7 +323,10 @@ def _lyrics_mp3(file_path: str) -> Optional[str]:
     if tags:
         for key in tags:
             if key.startswith("USLT"):
-                return tags[key].text or None
+                text = tags[key].text or None
+                del audio
+                return text
+    del audio
     return None
 
 
@@ -309,9 +335,14 @@ def _lyrics_flac(file_path: str) -> Optional[str]:
     from mutagen.flac import FLAC
     audio = FLAC(file_path)
     if "LYRICS" in audio and audio["LYRICS"]:
-        return str(audio["LYRICS"][0])
+        result = str(audio["LYRICS"][0])
+        del audio
+        return result
     if "UNSYNCEDLYRICS" in audio and audio["UNSYNCEDLYRICS"]:
-        return str(audio["UNSYNCEDLYRICS"][0])
+        result = str(audio["UNSYNCEDLYRICS"][0])
+        del audio
+        return result
+    del audio
     return None
 
 
@@ -320,9 +351,14 @@ def _lyrics_ogg(file_path: str) -> Optional[str]:
     from mutagen.oggvorbis import OggVorbis
     audio = OggVorbis(file_path)
     if "LYRICS" in audio and audio["LYRICS"]:
-        return str(audio["LYRICS"][0])
+        result = str(audio["LYRICS"][0])
+        del audio
+        return result
     if "UNSYNCEDLYRICS" in audio and audio["UNSYNCEDLYRICS"]:
-        return str(audio["UNSYNCEDLYRICS"][0])
+        result = str(audio["UNSYNCEDLYRICS"][0])
+        del audio
+        return result
+    del audio
     return None
 
 
@@ -332,7 +368,10 @@ def _lyrics_m4a(file_path: str) -> Optional[str]:
     audio = MP4(file_path)
     lyr = audio.get("\xa9lyr")
     if lyr:
-        return str(lyr[0])
+        result = str(lyr[0])
+        del audio
+        return result
+    del audio
     return None
 
 
@@ -341,7 +380,10 @@ def _lyrics_wma(file_path: str) -> Optional[str]:
     from mutagen.asf import ASF
     audio = ASF(file_path)
     if "WM/Lyrics" in audio and audio["WM/Lyrics"]:
-        return str(audio["WM/Lyrics"][0].value)
+        result = str(audio["WM/Lyrics"][0].value)
+        del audio
+        return result
+    del audio
     return None
 
 
@@ -351,9 +393,12 @@ def _lyrics_ape(file_path: str) -> Optional[str]:
     audio = APEv2(file_path)
     for key in ("Lyrics", "LYRICS", "Unsynced Lyrics"):
         try:
-            return str(audio[key])
+            result = str(audio[key])
+            del audio
+            return result
         except KeyError:
             continue
+    del audio
     return None
 
 
@@ -454,33 +499,61 @@ class MetadataReader:
 
     def read_cover(self, file_path: str) -> Optional[bytes]:
         """
-        读取封面图片二进制数据（按格式路由）。
+        读取封面图片二进制数据。
 
-        WMA 按 §7.1 约定不支持封面读取，返回 None。
+        优先级：
+        1. 标签内嵌封面（按格式路由）
+        2. 同目录下的 ``cover.jpg``（FILES 保存模式落盘的独立封面文件）
+
+        WMA 按 §7.1 约定不支持标签封面，但仍会回退检查 cover.jpg。
         读取失败时返回 None（不抛异常）。
         """
         suffix = Path(file_path).suffix.lower().lstrip(".")
         cover_fn = self._COVER_DISPATCH.get(suffix)
-        if cover_fn is None:
-            return None
-        try:
-            return self._read_with_retry(file_path, cover_fn)
-        except Exception as e:
-            logger.warning(f"读取封面失败 {file_path}: {e}")
-            return None
+        if cover_fn is not None:
+            try:
+                result = self._read_with_retry(file_path, cover_fn)
+                if result is not None:
+                    return result
+            except Exception as e:
+                logger.warning(f"读取标签封面失败 {file_path}: {e}")
+
+        # —— 回退：检查同目录 cover.jpg （FILES 保存模式）——
+        cover_jpg = Path(file_path).parent / "cover.jpg"
+        if cover_jpg.is_file():
+            try:
+                return cover_jpg.read_bytes()
+            except Exception as e:
+                logger.warning(f"读取独立封面文件失败 {cover_jpg}: {e}")
+
+        return None
 
     def read_lyrics(self, file_path: str) -> Optional[str]:
         """
-        读取嵌入歌词文本（按格式路由）。
+        读取歌词文本。
+
+        优先级：
+        1. 标签内嵌歌词（按格式路由）
+        2. 同目录下的 ``.lrc`` 文件（FILES 保存模式落盘的独立歌词文件）
 
         读取失败时返回 None（不抛异常）。
         """
         suffix = Path(file_path).suffix.lower().lstrip(".")
         lyrics_fn = self._LYRICS_DISPATCH.get(suffix)
-        if lyrics_fn is None:
-            return None
-        try:
-            return self._read_with_retry(file_path, lyrics_fn)
-        except Exception as e:
-            logger.warning(f"读取歌词失败 {file_path}: {e}")
-            return None
+        if lyrics_fn is not None:
+            try:
+                result = self._read_with_retry(file_path, lyrics_fn)
+                if result is not None:
+                    return result
+            except Exception as e:
+                logger.warning(f"读取标签歌词失败 {file_path}: {e}")
+
+        # —— 回退：检查同目录 .lrc 文件（FILES 保存模式）——
+        lrc_path = Path(file_path).with_suffix(".lrc")
+        if lrc_path.is_file():
+            try:
+                return lrc_path.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:
+                logger.warning(f"读取独立歌词文件失败 {lrc_path}: {e}")
+
+        return None
