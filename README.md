@@ -6,6 +6,8 @@
 
 ---
 
+[main-page](docs/main-page.png)
+
 ## 功能特性
 
 - **多格式标签读写**：支持 MP3 / FLAC / M4A / OGG / WMA / APE 的标签读取与写入。
