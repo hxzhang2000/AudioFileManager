@@ -26,6 +26,7 @@ def write(file_path, meta, cover_data, lyrics_text):
     if lyrics_text:
         audio["WM/Lyrics"] = lyrics_text
     audio.save()
+    del audio
 
 
 def write_lyrics(file_path, lyrics_text):
@@ -33,6 +34,7 @@ def write_lyrics(file_path, lyrics_text):
     audio = ASF(file_path)
     audio["WM/Lyrics"] = lyrics_text
     audio.save()
+    del audio
 
 
 def read_metadata(file_path) -> dict[str, Any]:
@@ -55,6 +57,7 @@ def read_metadata(file_path) -> dict[str, Any]:
         except (ValueError, TypeError):
             track_num = None
     year_str = str(year_raw).strip()[:4] if year_raw else ""
+    del audio
     return {
         "title": str(_get("Title") or ""),
         "artist": str(_get("Author") or ""),
@@ -71,5 +74,8 @@ def read_lyrics(file_path) -> Optional[str]:
     audio = ASF(file_path)
     v = audio.get("WM/Lyrics")
     if not v:
+        del audio
         return None
-    return v[0] if isinstance(v, (list, tuple)) else str(v)
+    result = v[0] if isinstance(v, (list, tuple)) else str(v)
+    del audio
+    return result

@@ -32,6 +32,7 @@ def write(file_path, meta, cover_data, lyrics_text):
         pic.data = cover_data
         audio["METADATA_BLOCK_PICTURE"] = base64.b64encode(pic.write()).decode("ascii")
     audio.save()
+    del audio
 
 
 def write_cover(file_path, cover_data):
@@ -47,6 +48,7 @@ def write_cover(file_path, cover_data):
     pic.data = cover_data
     audio["METADATA_BLOCK_PICTURE"] = base64.b64encode(pic.write()).decode("ascii")
     audio.save()
+    del audio
 
 
 def write_lyrics(file_path, lyrics_text):
@@ -56,6 +58,7 @@ def write_lyrics(file_path, lyrics_text):
         audio.add_tags()
     audio["LYRICS"] = lyrics_text
     audio.save()
+    del audio
 
 
 def read_metadata(file_path) -> dict[str, Any]:
@@ -78,6 +81,7 @@ def read_metadata(file_path) -> dict[str, Any]:
         except (ValueError, TypeError):
             track_num = None
     year_str = str(year_raw).strip()[:4] if year_raw else ""
+    del audio
     return {
         "title": str(_get("TITLE") or ""),
         "artist": str(_get("ARTIST") or ""),
@@ -103,9 +107,11 @@ def read_cover(file_path) -> Optional[bytes]:
         except Exception:
             continue
         if pic.type == 3:
+            del audio
             return pic.data
         if fallback is None:
             fallback = pic.data
+    del audio
     return fallback
 
 
@@ -115,5 +121,8 @@ def read_lyrics(file_path) -> Optional[str]:
     audio = OggVorbis(file_path)
     v = audio.get("LYRICS")
     if not v:
+        del audio
         return None
-    return v[0] if isinstance(v, (list, tuple)) else str(v)
+    result = v[0] if isinstance(v, (list, tuple)) else str(v)
+    del audio
+    return result

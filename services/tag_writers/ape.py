@@ -26,6 +26,7 @@ def write(file_path, meta, cover_data, lyrics_text):
     if cover_data:
         audio["Cover Art (Front)"] = APEBinaryValue(b"cover.jpg\x00" + cover_data)
     audio.save(file_path)
+    del audio
 
 
 def write_cover(file_path, cover_data):
@@ -36,6 +37,7 @@ def write_cover(file_path, cover_data):
         audio = APEv2()
     audio["Cover Art (Front)"] = APEBinaryValue(b"cover.jpg\x00" + cover_data)
     audio.save(file_path)
+    del audio
 
 
 def write_lyrics(file_path, lyrics_text):
@@ -46,6 +48,7 @@ def write_lyrics(file_path, lyrics_text):
         audio = APEv2()
     audio["Lyrics"] = lyrics_text
     audio.save(file_path)
+    del audio
 
 
 def read_metadata(file_path) -> dict[str, Any]:
@@ -71,6 +74,7 @@ def read_metadata(file_path) -> dict[str, Any]:
         except (ValueError, TypeError):
             track_num = None
     year_str = str(year_raw).strip()[:4] if year_raw else ""
+    del audio
     return {
         "title": _get("Title") or "",
         "artist": _get("Artist") or "",
@@ -94,11 +98,15 @@ def read_cover(file_path) -> Optional[bytes]:
         return None
     val = audio.get("Cover Art (Front)")
     if val is None:
+        del audio
         return None
     data = bytes(val)
     sep = data.find(b"\x00")
     if sep >= 0:
-        return data[sep + 1:]
+        result = data[sep + 1:]
+        del audio
+        return result
+    del audio
     return data
 
 
@@ -110,4 +118,6 @@ def read_lyrics(file_path) -> Optional[str]:
     except APENoHeaderError:
         return None
     val = audio.get("Lyrics")
-    return str(val) if val is not None else None
+    result = str(val) if val is not None else None
+    del audio
+    return result
