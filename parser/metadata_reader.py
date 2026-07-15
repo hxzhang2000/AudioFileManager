@@ -227,7 +227,11 @@ def _read_ape(file_path: str) -> dict:
 def _cover_mp3(file_path: str) -> Optional[bytes]:
     """读取 MP3 封面（APIC 帧）。"""
     from mutagen.mp3 import MP3
-    audio = MP3(file_path)
+    try:
+        audio = MP3(file_path)
+    except Exception as e:
+        logger.warning(f"_cover_mp3: 无法打开 MP3 文件 {file_path}: {e}")
+        return None
     tags = audio.tags
     if tags:
         for key in tags:
@@ -235,6 +239,8 @@ def _cover_mp3(file_path: str) -> Optional[bytes]:
                 data = tags[key].data
                 del audio
                 return data
+    else:
+        logger.debug(f"_cover_mp3: {file_path} 没有 ID3 标签")
     del audio
     return None
 

@@ -24,10 +24,11 @@ from typing import Optional, Tuple
 # ============================================================
 
 APP_NAME = "AudioFileManager"
-APP_VERSION = "1.0.22"
+APP_VERSION = "1.0.23"
 APP_DESCRIPTION = "音频文件管理工具：自动识别元数据、补全封面与歌词、整理目录结构"
 APP_AUTHOR = "AudioFileManager Team"
-APP_HOMEPAGE = ""
+APP_HOMEPAGE = "https://github.com/hxzhang2000/AudioFileManager"
+APP_GITHUB_URL = "https://github.com/hxzhang2000/AudioFileManager"
 
 
 # ============================================================

@@ -34,17 +34,22 @@ from PyQt6.QtCore import Qt, QSettings, QSize, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
+    QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QSplitter,
     QStatusBar,
     QToolBar,
+    QVBoxLayout,
     QWidget,
 )
 
 from utils.logger import logger, set_file_logging_enabled
-from version import APP_NAME, APP_VERSION, version_display
+from version import APP_NAME, APP_VERSION, APP_GITHUB_URL, version_display
 
 # —— 配置与处理模块（懒导入以降低启动耦合）——
 from config.settings import get_config, get_config_dir
@@ -320,14 +325,114 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "设置", f"打开设置失败：{e}")
 
     def _on_about(self):
-        """帮助→关于：显示关于对话框。"""
-        QMessageBox.about(
-            self, f"关于 {APP_NAME}",
-            f"<h3>{APP_NAME} v{APP_VERSION}</h3>"
-            "<p>音频文件管理工具：自动识别元数据、补全封面与歌词、"
-            "整理目录结构。</p>"
-            "<p>技术栈：PyQt6 + mutagen + httpx</p>"
-            "<p style='color:#888;'>基于 docs/develop-plan.md §8A 实现</p>")
+        """帮助→关于：显示关于对话框（含 GitHub Star 按钮）。"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"关于 {APP_NAME}")
+        dialog.setFixedSize(480, 320)
+        dialog.setStyleSheet(self._about_dialog_style())
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(12)
+
+        # 标题
+        title = QLabel(f"<h2 style='margin:0;'>{APP_NAME}</h2>")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        # 版本号
+        ver = QLabel(f"<p style='color:#aaa;font-size:13px;'>v{APP_VERSION}</p>")
+        ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(ver)
+
+        layout.addSpacing(4)
+
+        # 描述
+        desc = QLabel(
+            "<p style='font-size:13px;line-height:1.6;'>"
+            "音频文件管理工具：自动识别元数据、补全封面与歌词、整理目录结构。</p>"
+            "<p style='color:#999;font-size:12px;'>技术栈：PyQt6 + mutagen + httpx</p>"
+        )
+        desc.setWordWrap(True)
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(desc)
+
+        layout.addStretch()
+
+        # Star 提示行 + 按钮
+        star_layout = QHBoxLayout()
+        star_layout.setSpacing(8)
+        star_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        hint = QLabel(
+            "<span style='font-size:13px;'>如果它解决了你的问题，请不要吝啬你的 Star 哟！</span>"
+        )
+        star_layout.addWidget(hint)
+
+        arrow = QLabel("<span style='font-size:16px;'>👉</span>")
+        star_layout.addWidget(arrow)
+
+        star_btn = QPushButton("⭐ Star on GitHub")
+        star_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        star_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #238636;
+                color: #fff;
+                border: 1px solid #2ea043;
+                border-radius: 6px;
+                padding: 8px 18px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2ea043;
+            }
+            QPushButton:pressed {
+                background-color: #196c2e;
+            }
+        """)
+        star_btn.clicked.connect(
+            lambda: __import__("webbrowser").open(APP_GITHUB_URL)
+        )
+        star_layout.addWidget(star_btn)
+
+        layout.addLayout(star_layout)
+        layout.addSpacing(8)
+
+        # 底部关闭按钮
+        close_layout = QHBoxLayout()
+        close_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        close_btn = QPushButton("关闭")
+        close_btn.setFixedWidth(100)
+        close_btn.clicked.connect(dialog.accept)
+        close_layout.addWidget(close_btn)
+        layout.addLayout(close_layout)
+
+        dialog.exec()
+
+    @staticmethod
+    def _about_dialog_style() -> str:
+        """关于对话框的基础样式表。"""
+        return """
+            QDialog {
+                background-color: #1e1e1e;
+            }
+            QLabel {
+                color: #d4d4d4;
+                background: transparent;
+            }
+            QPushButton {
+                background-color: #333;
+                color: #d4d4d4;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 6px 16px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #444;
+            }
+        """
 
     # ============================================================
     # 文件列表变化槽
@@ -569,7 +674,9 @@ class MainWindow(QMainWindow):
                 "year": metadata.get("release_year"),
                 "genre": metadata.get("genre") or "",
                 "track_number": metadata.get("track_number"),
-                "cover_data": metadata.get("cover_data"),
+                # cover_data 为 None 时不覆盖面板已有封面（FILES 模式下搜索未找到新封面时
+                # cover_data 为 None，但我们不应因此清空面板上来自嵌入式标签的已有封面）
+                "cover_data": metadata.get("cover_data") or self.detail_panel.get_cover_data(),
                 "lyrics_text": metadata.get("lyrics_text") or "",
             }
             self.detail_panel.set_metadata(meta)

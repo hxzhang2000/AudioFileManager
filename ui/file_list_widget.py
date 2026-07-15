@@ -195,6 +195,8 @@ class FileListWidget(QWidget):
 
         # 选中行变化 → 通知主窗口更新详情面板
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
+        # 当前项变化（同一行不同列点击也触发）→ 确保同列点击后重新加载
+        self._table.currentItemChanged.connect(self._on_selection_changed)
         # 双击 → 发出 file_double_clicked 信号
         self._table.doubleClicked.connect(self._on_double_clicked)
         # 勾选状态变化 → 刷新计数标签

@@ -28,3 +28,6 @@ Thumbs.db
 .env
 *.key
 *.pem
+
+# Test scripts (ad-hoc coverage / diagnostic)
+test_cover*.py

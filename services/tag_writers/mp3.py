@@ -21,7 +21,7 @@ def replace_front_cover(audio, cover_data):
     audio.tags.delall("APIC")
     for f in existing:
         audio.tags.add(f)
-        audio.tags.add(APIC(
+    audio.tags.add(APIC(
         encoding=Encoding.UTF8, mime="image/jpeg", type=3,
         desc="Cover", data=cover_data,
     ))

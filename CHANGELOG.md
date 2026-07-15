@@ -3,6 +3,18 @@
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式，
 版本号遵循 [语义化版本控制 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [1.0.23] - 2026-07-15
+
+### Fixed
+
+- **批处理后点击同一行封面消失（FILES 模式）**：`_on_batch_file_metadata_updated` 在搜索结果无封面时用 `cover_data=None` 覆盖面板已有封面；且文件列表仅监听 `itemSelectionChanged`，批处理后点击已选中的同一行不触发热加载。现修复：批处理信号中 `cover_data` 为 None 时不覆盖面板；新增 `currentItemChanged` 确保点击同列也触发重新读取文件元数据。
+- **`replace_front_cover()` 缩进错误导致重复封面帧**：`audio.tags.add(APIC(...))` 被错误放置在 `for f in existing:` 循环内，每次循环都额外添加一次封面帧。现移至循环外，保证封面帧仅添加一份。
+
+### Added
+
+- **关于对话框升级**：从简单的 `QMessageBox.about` 替换为自定义 `QDialog`，新增 GitHub Star 按钮，用户可一键打开项目主页给予支持。
+- **封面读取诊断日志**：`_cover_mp3()` 新增 try/except 和 ID3 标签缺失检测日志，便于排查封面加载失败原因。
+
 ## [1.0.22] - 2026-07-14
 
 ### Fixed

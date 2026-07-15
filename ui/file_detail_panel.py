@@ -333,6 +333,10 @@ class FileDetailPanel(QWidget):
         """返回当前面板显示的文件路径。"""
         return self._file_path
 
+    def get_cover_data(self) -> Optional[bytes]:
+        """返回当前面板显示的封面二进制数据（可能为 None）。"""
+        return self._cover_data
+
     def clear_panel(self):
         """清空面板（无选中文件时调用）。"""
         self._file_path = ""
