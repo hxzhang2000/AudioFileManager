@@ -54,6 +54,9 @@ from version import APP_NAME, APP_VERSION, APP_GITHUB_URL, version_display
 # —— 配置与处理模块（懒导入以降低启动耦合）——
 from config.settings import get_config, get_config_dir
 
+# —— Web 管理服务器 ——
+from services.web_server import WebServer, get_bridge
+
 from ui.file_list_widget import FileListWidget
 from ui.file_detail_panel import FileDetailPanel
 from ui.progress_widget import ProgressWidget
@@ -118,6 +121,177 @@ class MainWindow(QMainWindow):
 
         # 恢复窗口几何与分隔条状态
         self._restore_geometry()
+
+        # —— 启动 Web 管理服务器 ——
+        self._web_server: WebServer | None = None
+        self._init_web_server()
+
+    # ------------------------------------------------------------
+    # Web 管理服务器
+    # ------------------------------------------------------------
+
+    def _init_web_server(self) -> None:
+        """初始化并启动 Web 管理服务器。"""
+        try:
+            config = get_config()
+            self._web_server = WebServer(config)
+            # 绑定桥接器
+            bridge = get_bridge()
+            bridge.bind(
+                main_window=self,
+                file_list_widget=self.file_list,
+            )
+            # 注册文件列表动作
+            bridge.register_action("add_folder", self._on_web_add_folder)
+
+            if config.get("web", {}).get("enabled", False):
+                self._web_server.start()
+
+            # 启动定时更新桥状态（每 500ms）
+            from PyQt6.QtCore import QTimer
+            self._web_timer = QTimer(self)
+            self._web_timer.timeout.connect(self._update_web_bridge)
+            self._web_timer.start(500)
+        except Exception as e:
+            logger.warning(f"Web 管理服务器初始化失败: {e}")
+            self._web_server = None
+
+    def _update_web_bridge(self) -> None:
+        """定时更新 WebBridge 状态快照。"""
+        bridge = get_bridge()
+        batch = self._batch
+        files = self.file_list.get_files()
+        checked = self.file_list.get_checked_files()
+        total = len(files)
+
+        if batch is not None and batch.isRunning():
+            # 批处理运行中：统计来自进度相关属性
+            done = 0
+            skipped = 0
+            failed = 0
+            # 通过文件列表状态统计
+            if hasattr(self.file_list, "get_file_status"):
+                for f in files:
+                    st = self.file_list.get_file_status(f)
+                    if st == "done":
+                        done += 1
+                    elif st == "skipped":
+                        skipped += 1
+                    elif st and st != "" and st != "waiting":
+                        failed += 1
+            cur_file = self.progress_widget._current_file if hasattr(self.progress_widget, "_current_file") else ""
+            bridge.update_status(
+                batch_running=True,
+                batch_paused=batch.is_paused,
+                current_file=cur_file,
+                done_count=done,
+                skipped_count=skipped,
+                failed_count=failed,
+                total_files=total,
+                checked_files=len(checked),
+            )
+        else:
+            # 空闲状态
+            bridge.update_status(
+                batch_running=False,
+                batch_paused=False,
+                current=0,
+                total=0,
+                current_file="",
+                step_name="",
+                done_count=0,
+                skipped_count=0,
+                failed_count=0,
+                total_files=total,
+                checked_files=len(checked),
+            )
+
+        # 缓存文件列表快照供 Web API 读取
+        file_cache: list[dict] = []
+        for p in files:
+            try:
+                name = os.path.basename(p)
+                size = os.path.getsize(p)
+                suffix = os.path.splitext(p)[1].lower()
+                file_cache.append({
+                    "path": p,
+                    "name": name,
+                    "size": size,
+                    "ext": suffix,
+                    "status": "",
+                })
+            except Exception:
+                file_cache.append({"path": p, "name": os.path.basename(p), "size": 0, "ext": "", "status": ""})
+        bridge.set_cached_files(file_cache)
+
+        # 处理来自 Web 的动作队列
+        for action in bridge.drain_actions():
+            self._process_web_action(action)
+
+    def _process_web_action(self, action: dict) -> None:
+        """处理从 Web 页面发来的动作。"""
+        name = action.get("action", "")
+        params = action.get("params", {})
+
+        if name == "batch_start":
+            self._on_start_batch()
+        elif name == "batch_pause":
+            self._on_pause_batch()
+        elif name == "batch_stop":
+            self._on_stop_batch()
+        elif name == "add_folder":
+            folder = params.get("folder", "")
+            if folder:
+                self.file_list.add_folder(folder)
+
+    def _on_web_add_folder(self, folder: str) -> dict:
+        """Web 触发的加载目录动作（在 Web 线程中执行）。"""
+        # 通过 invokeMethod 异步执行
+        from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
+        if folder:
+            QMetaObject.invokeMethod(
+                self.file_list, "add_folder",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, folder),
+            )
+            return {"ok": True, "path": folder}
+        return {"error": "empty path"}
+
+    def _web_start_server(self, web_cfg: dict) -> None:
+        """启动 Web 服务器。
+
+        Args:
+            web_cfg: 来自对话框的 web 配置（尚未持久化）。
+        """
+        if self._web_server is None:
+            self._init_web_server()
+        if self._web_server is not None:
+            config = get_config()
+            config["web"] = web_cfg
+            success = self._web_server.restart(config)
+            if success:
+                self._status.showMessage(f"Web 服务已启动（端口 {web_cfg.get('port', 8080)}）", 3000)
+
+    def _web_stop_server(self) -> None:
+        """停止 Web 服务器。"""
+        if self._web_server is not None:
+            self._web_server.stop()
+            self._status.showMessage("Web 服务已停止。", 3000)
+
+    def _web_restart_server(self, web_cfg: dict) -> None:
+        """重启 Web 服务器（应用新端口/地址配置）。
+
+        Args:
+            web_cfg: 来自对话框的 web 配置（尚未持久化）。
+        """
+        if self._web_server is not None:
+            config = get_config()
+            config["web"] = web_cfg
+            success = self._web_server.restart(config)
+            if success:
+                self._status.showMessage(f"Web 服务已重启（端口 {web_cfg.get('port', 8080)}）", 3000)
+        else:
+            self._init_web_server()
 
     # ============================================================
     # UI 构建
@@ -308,6 +482,10 @@ class MainWindow(QMainWindow):
 
         try:
             dialog = SettingsDialog(get_config(), self)
+            # 连接 Web 服务控制信号
+            dialog.web_start_requested.connect(self._web_start_server)
+            dialog.web_stop_requested.connect(self._web_stop_server)
+            dialog.web_restart_requested.connect(self._web_restart_server)
             if dialog.exec():
                 # 对话框 accepted：获取用户修改并保存
                 new_config = dialog.get_config()
@@ -901,6 +1079,15 @@ class MainWindow(QMainWindow):
             self._search_thread.quit()
             self._search_thread.wait(3000)
             self._search_thread = None
+
+        # 停止 Web 管理服务器
+        if self._web_server is not None:
+            self._web_server.stop()
+            self._web_server = None
+
+        # 停止 Web 状态定时器
+        if hasattr(self, "_web_timer") and self._web_timer is not None:
+            self._web_timer.stop()
 
 
 # ============================================================

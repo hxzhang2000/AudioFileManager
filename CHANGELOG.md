@@ -3,6 +3,17 @@
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式，
 版本号遵循 [语义化版本控制 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [1.1.0] - 2026-07-16
+
+### Added
+
+- **Web 管理服务器**：基于 Flask + waitress 的局域网 Web 服务，支持在浏览器中查看批处理状态、控制启停、浏览音频目录与加载文件。
+  - REST API: `/api/status`（实时状态）、`/api/action`（控制）、`/api/files`（文件列表）、`/api/directory`（目录浏览与加载）、`/api/events`（SSE 推送）
+  - 深色主题单页 Web UI，包含概览、文件列表、浏览目录、日志四页面
+  - `WebBridge` 线程安全桥接器，实现 Web 服务线程与 Qt UI 线程之间的状态同步和动作队列
+  - 设置对话框新增「Web 服务」标签页，可配置启用/端口/监听地址，支持运行时重启
+- `requirements.txt`：新增 `flask>=3.0.0`、`waitress>=3.0.0` 依赖
+
 ## [1.0.23] - 2026-07-15
 
 ### Fixed

@@ -119,3 +119,17 @@ QSlider::handle:horizontal {
     background: #3d5a80; border-radius: 7px;
 }
 QSlider::sub-page:horizontal { background: #3d5a80; border-radius: 2px; }
+
+/* 标签页 */
+QTabWidget::pane {
+    background-color: #1e1f26; border: 1px solid #3a3d4d; border-top: none;
+}
+QTabBar::tab {
+    background-color: #23252e; color: #e0e0e0; padding: 8px 20px;
+    border: 1px solid #3a3d4d; border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px;
+    min-width: 80px;
+}
+QTabBar::tab:hover { background-color: #2f3140; }
+QTabBar::tab:selected {
+    background-color: #1e1f26; color: #ffffff; border-bottom: 1px solid #1e1f26;
+}

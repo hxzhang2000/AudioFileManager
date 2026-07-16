@@ -26,7 +26,7 @@ from typing import Any, Dict, List
 
 from utils.logger import logger
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -63,6 +63,11 @@ class SettingsDialog(QDialog):
     :meth:`get_config` 获取更新后的完整配置 dict。
     """
 
+    # Web 服务操作信号（均携带当前 web 配置字典）
+    web_start_requested = pyqtSignal(dict)
+    web_stop_requested = pyqtSignal()
+    web_restart_requested = pyqtSignal(dict)
+
     # 全部已知 Provider（用于顺序列表与启用勾选）
     ALL_PROVIDERS = ["itunes", "lrclib", "musicbrainz", "meting"]
 
@@ -98,6 +103,7 @@ class SettingsDialog(QDialog):
         self.tab_widget.addTab(self._build_conflict_tab(), "冲突")
         self.tab_widget.addTab(self._build_save_mode_tab(), "保存模式")
         self.tab_widget.addTab(self._build_logging_tab(), "日志")
+        self.tab_widget.addTab(self._build_web_tab(), "Web 服务")
         layout.addWidget(self.tab_widget)
 
         # 底部按钮
@@ -505,6 +511,144 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         return tab
 
+    # ------------------------------------------------------------
+    # Web 服务设置 Tab
+    # ------------------------------------------------------------
+
+    def _build_web_tab(self) -> QWidget:
+        """Web 服务设置：启用、端口、重启。"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        intro = QLabel(
+            "通过局域网浏览器管理音频文件。需要安装 flask + waitress。\n"
+            "启用后访问 http://本机IP:{端口} 即可打开管理界面。"
+        )
+        intro.setStyleSheet("color: #888; font-size: 12px;")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        layout.addSpacing(12)
+
+        # --- 基本设置 ---
+        group = QGroupBox("服务设置")
+        form = QFormLayout(group)
+
+        self._chk_web_enabled = QCheckBox("启用 Web 服务")
+        self._chk_web_enabled.setToolTip("启用后应用启动时自动开启 Web 服务器。")
+        form.addRow(self._chk_web_enabled)
+
+        self._spin_web_port = QSpinBox()
+        self._spin_web_port.setRange(1024, 65535)
+        self._spin_web_port.setValue(8080)
+        self._spin_web_port.setToolTip("监听端口（默认 8080）。")
+        form.addRow("监听端口:", self._spin_web_port)
+
+        self._edit_web_host = QLineEdit("0.0.0.0")
+        self._edit_web_host.setToolTip(
+            "监听地址。0.0.0.0 表示所有网络接口均可访问，\n"
+            "127.0.0.1 仅限本机访问。"
+        )
+        form.addRow("监听地址:", self._edit_web_host)
+
+        layout.addWidget(group)
+
+        # --- 状态与操作 ---
+        status_group = QGroupBox("状态")
+        status_layout = QVBoxLayout(status_group)
+
+        self._lbl_web_status = QLabel("当前状态：未启动")
+        self._lbl_web_status.setStyleSheet("color: #888;")
+        status_layout.addWidget(self._lbl_web_status)
+
+        btn_row = QHBoxLayout()
+        self._btn_web_start = QPushButton("启动服务")
+        self._btn_web_start.setToolTip("启动 Web 服务器。")
+        self._btn_web_start.clicked.connect(self._on_web_start)
+        btn_row.addWidget(self._btn_web_start)
+
+        self._btn_web_stop = QPushButton("停止服务")
+        self._btn_web_stop.setToolTip("停止 Web 服务器。")
+        self._btn_web_stop.clicked.connect(self._on_web_stop)
+        btn_row.addWidget(self._btn_web_stop)
+
+        self._btn_web_restart = QPushButton("重启 Web 服务")
+        self._btn_web_restart.setToolTip(
+            "点击后立即重启 Web 服务（使端口/地址变更生效）。\n"
+            "重启操作在确定/取消按钮之外独立触发。"
+        )
+        self._btn_web_restart.clicked.connect(self._on_web_restart)
+        btn_row.addWidget(self._btn_web_restart)
+        status_layout.addLayout(btn_row)
+
+        layout.addWidget(status_group)
+
+        # --- 依赖检查 ---
+        dep_group = QGroupBox("依赖检查")
+        dep_layout = QVBoxLayout(dep_group)
+        try:
+            import flask  # noqa: F401
+            dep_layout.addWidget(QLabel("✓ Flask 已安装"))
+        except ImportError:
+            dep_layout.addWidget(QLabel("✗ Flask 未安装（pip install flask）"))
+        try:
+            import waitress  # noqa: F401
+            dep_layout.addWidget(QLabel("✓ waitress 已安装"))
+        except ImportError:
+            dep_layout.addWidget(QLabel("✗ waitress 未安装（pip install waitress）"))
+        layout.addWidget(dep_group)
+
+        layout.addStretch()
+        return tab
+
+    def _on_web_start(self):
+        """点击「启动服务」按钮。"""
+        web_cfg = {
+            "enabled": True,
+            "port": self._spin_web_port.value(),
+            "host": self._edit_web_host.text().strip() or "0.0.0.0",
+        }
+        self.web_start_requested.emit(web_cfg)
+        QTimer.singleShot(300, self._refresh_web_status)
+
+    def _on_web_stop(self):
+        """点击「停止服务」按钮。"""
+        self.web_stop_requested.emit()
+        QTimer.singleShot(300, self._refresh_web_status)
+
+    def _on_web_restart(self):
+        """点击「重启 Web 服务」按钮 — 携带对话框当前 web 配置发射信号。"""
+        web_cfg = {
+            "enabled": self._chk_web_enabled.isChecked(),
+            "port": self._spin_web_port.value(),
+            "host": self._edit_web_host.text().strip() or "0.0.0.0",
+        }
+        self.web_restart_requested.emit(web_cfg)
+        QTimer.singleShot(300, self._refresh_web_status)
+
+    def _refresh_web_status(self):
+        """通过桥接器查询 Web 服务器实时状态并更新界面。"""
+        try:
+            from services.web_server import get_bridge
+            running = get_bridge().get_status().server_running
+            self._update_web_status(running)
+        except Exception:
+            pass
+
+    def _update_web_status(self, running: bool) -> None:
+        """更新 Web 服务状态显示，同时调整按钮启用状态。"""
+        if running:
+            self._lbl_web_status.setText("当前状态：运行中 🟢")
+            self._lbl_web_status.setStyleSheet("color: #00c853;")
+            self._btn_web_start.setEnabled(False)
+            self._btn_web_stop.setEnabled(True)
+            self._btn_web_restart.setEnabled(True)
+        else:
+            self._lbl_web_status.setText("当前状态：未启动 🔴")
+            self._lbl_web_status.setStyleSheet("color: #888;")
+            self._btn_web_start.setEnabled(True)
+            self._btn_web_stop.setEnabled(False)
+            self._btn_web_restart.setEnabled(False)
+
     # ============================================================
     # 配置加载 / 获取
     # ============================================================
@@ -609,6 +753,19 @@ class SettingsDialog(QDialog):
         # --- 日志 ---
         logging_cfg = self._config.get("logging", {})
         self.chk_logging_enabled.setChecked(logging_cfg.get("enabled", True))
+
+        # --- Web 服务 ---
+        web_cfg = self._config.get("web", {})
+        self._chk_web_enabled.setChecked(web_cfg.get("enabled", False))
+        self._spin_web_port.setValue(int(web_cfg.get("port", 8080)))
+        self._edit_web_host.setText(web_cfg.get("host", "0.0.0.0"))
+        # 更新状态标签 — 实时查询服务器运行状态
+        try:
+            from services.web_server import get_bridge
+            srv_running = get_bridge().get_status().server_running
+        except Exception:
+            srv_running = False
+        self._update_web_status(srv_running)
 
     def _load_provider_list(self, order: List[str], enabled: Dict[str, bool]):
         """加载 Provider 列表（顺序 + 启用勾选）。
@@ -725,6 +882,13 @@ class SettingsDialog(QDialog):
 
         # --- 日志 ---
         cfg["logging"] = {"enabled": self.chk_logging_enabled.isChecked()}
+
+        # --- Web 服务 ---
+        cfg["web"] = {
+            "enabled": self._chk_web_enabled.isChecked(),
+            "port": self._spin_web_port.value(),
+            "host": self._edit_web_host.text().strip() or "0.0.0.0",
+        }
 
         return cfg
 
