@@ -73,6 +73,11 @@
         "skip_existing": false,
         "quality_priority": ["bitrate", "sample_rate", "format"]
     },
+    "mv": {
+        "enabled": false,
+        "search_metadata": true,
+        "video_extensions": [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".m4v"]
+    },
     "last_input_dir": "",
     "last_output_dir": "",
     "web": {

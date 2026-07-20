@@ -56,6 +56,17 @@ def _migrate_v2_to_v3(cfg: dict):
 MIGRATIONS["3.0"] = _migrate_v2_to_v3
 
 
+def _migrate_v3_to_v4(cfg: dict):
+    """v3→v4: 新增 MV 视频整理配置块"""
+    cfg.setdefault("mv", {
+        "enabled": False,
+        "search_metadata": True,
+        "video_extensions": [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".m4v"],
+    })
+
+MIGRATIONS["4.0"] = _migrate_v3_to_v4
+
+
 def _parse_version(ver: str) -> tuple[int, ...]:
     """将版本号字符串解析为可比较的元组，如 '3.0' → (3, 0)"""
     try:

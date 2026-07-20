@@ -24,8 +24,8 @@ from typing import Optional, Tuple
 # ============================================================
 
 APP_NAME = "AudioFileManager"
-APP_VERSION = "1.1.0"
-APP_DESCRIPTION = "音频文件管理工具：自动识别元数据、补全封面与歌词、整理目录结构"
+APP_VERSION = "1.2.0"
+APP_DESCRIPTION = "音频文件管理工具：自动识别元数据、补全封面与歌词、整理目录结构；支持 MV 视频文件自动归类"
 APP_AUTHOR = "AudioFileManager Team"
 APP_HOMEPAGE = "https://github.com/hxzhang2000/AudioFileManager"
 APP_GITHUB_URL = "https://github.com/hxzhang2000/AudioFileManager"
