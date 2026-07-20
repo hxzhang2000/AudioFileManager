@@ -9,10 +9,14 @@
   3. [兜底] 占位文本
 """
 
+import io
 import re
 import sys
 import traceback
 from pathlib import Path
+
+# CI 环境（Windows）默认编码非 UTF-8，print() 输出中文会 UnicodeEncodeError
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
