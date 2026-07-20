@@ -123,6 +123,7 @@ class MainWindow(QMainWindow):
         self._restore_geometry()
 
         # —— 启动 Web 管理服务器 ——
+        self._mv_batch = None          # MV 整理线程
         self._web_server: WebServer | None = None
         self._init_web_server()
 
@@ -368,6 +369,12 @@ class MainWindow(QMainWindow):
         self._act_settings.triggered.connect(self._on_settings)
         op_menu.addAction(self._act_settings)
 
+        op_menu.addSeparator()
+
+        self._act_mv = QAction("MV 整理…", self)
+        self._act_mv.triggered.connect(self._on_mv_organize)
+        op_menu.addAction(self._act_mv)
+
         # —— 帮助菜单 ——
         help_menu = menubar.addMenu("帮助")
         self._act_about = QAction("关于", self)
@@ -388,6 +395,8 @@ class MainWindow(QMainWindow):
         self._toolbar.addAction(self._act_stop)
         self._toolbar.addSeparator()
         self._toolbar.addAction(self._act_settings)
+        self._toolbar.addSeparator()
+        self._toolbar.addAction(self._act_mv)
 
     def _setup_statusbar(self):
         """构建状态栏。"""
@@ -501,6 +510,69 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"打开设置对话框失败: {e}", exc_info=True)
             QMessageBox.warning(self, "设置", f"打开设置失败：{e}")
+
+    def _on_mv_organize(self):
+        """操作→MV 整理：执行 MV 视频文件整理。
+
+        源目录默认为当前工作目录（last_input_dir），输出目录复用「整理」页面设置。
+        """
+        from processor.mv_processor import MvProcessor
+        config = get_config()
+
+        # 源目录：默认使用 last_input_dir，为空时让用户选择
+        src = config.get("last_input_dir", "")
+        if not src or not os.path.isdir(src):
+            src = QFileDialog.getExistingDirectory(
+                self, "选择 MV 源目录（包含视频文件的文件夹）", ""
+            )
+            if not src:
+                return
+
+        # 输出目录：复用「整理」页面设置
+        out = config.get("organize", {}).get("output_dir", "")
+        if not out:
+            QMessageBox.warning(
+                self, "MV 整理",
+                "请先在「设置→整理」中配置输出目录。"
+            )
+            return
+
+        # 检查是否有线程已在运行
+        if self._mv_batch is not None and self._mv_batch.isRunning():
+            QMessageBox.information(self, "MV 整理", "MV 整理已在运行中。")
+            return
+
+        self._act_mv.setEnabled(False)
+        self._status.showMessage("MV 视频文件整理中…")
+
+        # 创建运行线程，传入源目录
+        self._mv_batch = MvProcessor(config, source_dir=src)
+        self._mv_batch.files_scanned.connect(self._on_mv_scanned)
+        self._mv_batch.progress_updated.connect(self.progress_widget.update_progress)
+        self._mv_batch.file_finished.connect(self._on_mv_file_finished)
+        self._mv_batch.batch_finished.connect(self._on_mv_batch_finished)
+        self._mv_batch.log_message.connect(self.progress_widget.log_message)
+        self.progress_widget.log_message("MV 整理开始…")
+        self._mv_batch.start()
+
+    def _on_mv_scanned(self, total: int):
+        """MV 整理扫描完成回调。"""
+        self._status.showMessage(f"MV 整理：发现 {total} 个视频文件")
+        self.progress_widget.set_max(total)
+
+    def _on_mv_file_finished(self, file_path: str, status: str):
+        """单个 MV 文件处理完成回调。"""
+        label = {None: "", "done": "✓", "failed": "✗", "skipped": "⏭"}
+        self.progress_widget.file_finished(file_path, label.get(status, status))
+
+    def _on_mv_batch_finished(self, success: int, failed: int):
+        """MV 整理全部完成回调。"""
+        self._act_mv.setEnabled(True)
+        self._mv_batch.deleteLater()
+        self._mv_batch = None
+        msg = f"MV 整理完成：成功 {success}，失败 {failed}"
+        self._status.showMessage(msg)
+        self.progress_widget.log_message(msg)
 
     def _on_about(self):
         """帮助→关于：显示关于对话框（含 GitHub Star 按钮）。"""
@@ -1079,6 +1151,16 @@ class MainWindow(QMainWindow):
             self._search_thread.quit()
             self._search_thread.wait(3000)
             self._search_thread = None
+
+        # 停止 MV 整理线程（若正在运行）
+        if self._mv_batch is not None and self._mv_batch.isRunning():
+            self._mv_batch.stop()
+            self._mv_batch.wait(3000)
+            if self._mv_batch.isRunning():
+                self._mv_batch.terminate()
+                self._mv_batch.wait(2000)
+            self._mv_batch.deleteLater()
+            self._mv_batch = None
 
         # 停止 Web 管理服务器
         if self._web_server is not None:

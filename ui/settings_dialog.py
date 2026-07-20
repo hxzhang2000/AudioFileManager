@@ -104,6 +104,7 @@ class SettingsDialog(QDialog):
         self.tab_widget.addTab(self._build_save_mode_tab(), "保存模式")
         self.tab_widget.addTab(self._build_logging_tab(), "日志")
         self.tab_widget.addTab(self._build_web_tab(), "Web 服务")
+        self.tab_widget.addTab(self._build_mv_tab(), "MV 整理")
         layout.addWidget(self.tab_widget)
 
         # 底部按钮
@@ -600,6 +601,67 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         return tab
 
+    # ------------------------------------------------------------
+    # MV 整理设置 Tab
+    # ------------------------------------------------------------
+
+    def _build_mv_tab(self) -> QWidget:
+        """MV 视频整理设置：仅扩展名与开关，其余复用整理/文件名页面设置。"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # 总体开关
+        self._chk_mv_enabled = QCheckBox("启用 MV 视频文件整理")
+        self._chk_mv_enabled.setToolTip(
+            "关闭后「操作→MV 整理」菜单项仍可见，但会提示先启用。"
+        )
+        layout.addWidget(self._chk_mv_enabled)
+        layout.addSpacing(8)
+
+        # 元数据搜索开关
+        self._chk_mv_search = QCheckBox("自动搜索元数据（获取专辑信息，依赖「搜索」页面配置）")
+        self._chk_mv_search.setToolTip(
+            "开启后 MV 整理时会自动搜索在线元数据，获取专辑/年份信息，\n"
+            "使 MV 与音乐文件进入同一专辑目录。关闭后仅按文件名整理。"
+        )
+        self._chk_mv_search.setChecked(True)
+        layout.addWidget(self._chk_mv_search)
+        layout.addSpacing(8)
+
+        # 提示：共享设置
+        shared_notice = QLabel(
+            "MV 整理复用以下页面中的设置：\n\n"
+            "• 目录设置 → 「整理」页面中的输出目录（源目录为当前工作目录）\n"
+            "• 分类与整理（按歌手 / unknown / 删除源文件）→ 「整理」页面\n"
+            "• 文件名模板 → 「文件名」页面"
+        )
+        shared_notice.setStyleSheet(
+            "color: #aaa; font-size: 12px; background: #2d2d2d; "
+            "padding: 12px; border-radius: 6px;"
+        )
+        shared_notice.setWordWrap(True)
+        layout.addWidget(shared_notice)
+
+        layout.addSpacing(12)
+
+        # --- 视频扩展名（MV 独有设置） ---
+        ext_group = QGroupBox("视频文件扩展名")
+        ext_layout = QVBoxLayout(ext_group)
+        ext_hint = QLabel(
+            "每行一个扩展名，匹配的文件将被识别为 MV 视频。"
+        )
+        ext_hint.setStyleSheet("color: #888; font-size: 11px;")
+        ext_layout.addWidget(ext_hint)
+        self._edit_mv_extensions = QLineEdit()
+        self._edit_mv_extensions.setPlaceholderText(
+            ".mp4, .mkv, .avi, .mov, .wmv, .webm, .m4v"
+        )
+        ext_layout.addWidget(self._edit_mv_extensions)
+        layout.addWidget(ext_group)
+
+        layout.addStretch()
+        return tab
+
     def _on_web_start(self):
         """点击「启动服务」按钮。"""
         web_cfg = {
@@ -767,6 +829,13 @@ class SettingsDialog(QDialog):
             srv_running = False
         self._update_web_status(srv_running)
 
+        # --- MV 整理 ---
+        mv_cfg = self._config.get("mv", {})
+        self._chk_mv_enabled.setChecked(mv_cfg.get("enabled", False))
+        exts = mv_cfg.get("video_extensions", [])
+        self._edit_mv_extensions.setText(", ".join(exts))
+        self._chk_mv_search.setChecked(mv_cfg.get("search_metadata", True))
+
     def _load_provider_list(self, order: List[str], enabled: Dict[str, bool]):
         """加载 Provider 列表（顺序 + 启用勾选）。
 
@@ -889,6 +958,15 @@ class SettingsDialog(QDialog):
             "port": self._spin_web_port.value(),
             "host": self._edit_web_host.text().strip() or "0.0.0.0",
         }
+
+        # --- MV 整理 ---
+        ext_text = self._edit_mv_extensions.text().strip()
+        exts = [e.strip() for e in ext_text.replace("，", ",").split(",") if e.strip()]
+        cfg.setdefault("mv", {}).update({
+            "enabled": self._chk_mv_enabled.isChecked(),
+            "search_metadata": self._chk_mv_search.isChecked(),
+            "video_extensions": exts or [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".m4v"],
+        })
 
         return cfg
 
