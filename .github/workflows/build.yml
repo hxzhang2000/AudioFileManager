@@ -32,6 +32,7 @@ jobs:
         run: python scripts/generate_release_body.py
 
       - name: Upload EXE & 创建 Release
+        if: ${{ !contains(github.ref_name, '-no-release') }}
         uses: softprops/action-gh-release@v2
         with:
           body_path: release_body.md

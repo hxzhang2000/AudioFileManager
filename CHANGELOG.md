@@ -3,6 +3,18 @@
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式，
 版本号遵循 [语义化版本控制 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [1.2.2] - 2026-07-20
+
+### Fixed
+
+- **Release 正文未包含 CHANGELOG 内容**：`generate_release_body.py` 正则匹配在 CI 环境中失效导致回退到占位文本。新增多级匹配策略（标准日期格式 → 宽松格式 → 文本搜索），并增加完整调试日志以便排查。
+- **只有发版一种模式**：workflow 中 Release 步骤新增 `if` 条件判断——tag 名不含 `-no-release` 后缀时才创建 Release。配合 release-flow skill 的发布类型选择（Release / Build-only），实现「仅构建不发版」的能力。
+
+### Changed
+
+- **release-flow skill**：新增第 1 步「发布类型选择」，Build-only 模式使用 `v{ver}-no-release` tag，CI 仅构建不创建 Release。
+- `.github/workflows/build.yml`：Release 步骤增加 `if: ${{ !contains(github.ref_name, '-no-release') }}`。
+
 ## [1.2.1] - 2026-07-20
 
 ### Added
