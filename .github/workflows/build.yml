@@ -36,5 +36,6 @@ jobs:
         with:
           body_path: release_body.md
           files: dist/AudioFileManager.exe
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
