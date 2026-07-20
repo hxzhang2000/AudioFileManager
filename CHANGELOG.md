@@ -3,6 +3,27 @@
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式，
 版本号遵循 [语义化版本控制 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [1.2.1] - 2026-07-20
+
+### Added
+
+- **MV 视频文件支持**：批处理时同步扫描 `.mkv`/`.mp4`/`.avi` 等视频文件，按扩展名路由到简化 4 步流程（解析 → 搜索 → 重命名 → 整理），与音频共用同一线程，不再独立开线程。
+- **非 MV 文件跳过保护**：文件名不匹配「歌曲名 - 歌手」模式且搜索无结果时自动跳过，避免把随机视频改名移出。
+- **设置弹窗 MV 标签页**：新增「MV/视频」配置标签页，支持启用 MV 处理、扩展名列表、搜索结果封面补全开关。
+- **设置弹窗 Tab 紧凑样式**：标签页文字缩小至 11px、间距收窄。
+- **脚本补充**：
+  - `scripts/restore_mv_from_log.py` — 从批处理日志回退已移动的 MV 文件到源目录
+  - `scripts/generate_release_body.py` — 从 CHANGELOG 提取 Release 正文
+- **Release 自动化**：
+  - `AudioFileManager.spec` 改从 `version.py` 动态读取版本号，EXE 嵌入 Windows 版本信息（右键属性可见）
+  - `.github/workflows/build.yml` 改用 `.spec` 构建，Release 自动附带 CHANGELOG 版本说明
+- **全局 skill**：`release-flow` 技能，一句话触发发版提交流程
+
+### Changed
+
+- **MV 处理合入 BatchProcessor**：移除 `main_window.py` 中的独立 MV 菜单/按钮和独立线程 `MvProcessor`，全部在 `batch_processor.py` 的 `run()` 中处理
+- `processor/file_scanner.py`、`ui/file_load_worker.py` 同步加入视频扩展名常量
+
 ## [1.1.0] - 2026-07-16
 
 ### Added

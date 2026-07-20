@@ -39,6 +39,9 @@ from processor.conflict_resolver import DuplicateDetector, ConflictResolver
 
 logger = logging.getLogger(__name__)
 
+# MV 视频文件默认扩展名（与 mv_processor.DEFAULT_VIDEO_EXTENSIONS 一致）
+DEFAULT_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".m4v"}
+
 
 class DuplicateFileException(Exception):
     """重复文件异常，用于在 _process_one() 中通知 run() 跳过该文件。"""
@@ -83,6 +86,8 @@ class BatchProcessor(QThread):
 
     # 子步骤名称列表（§10.7.5），共 6 步
     _SUB_STEPS = ["parsing", "searching", "enriching", "encoding", "writing", "organizing"]
+    # MV 视频文件子步骤（共 4 步，跳过编码/标签写入/封面歌词）
+    _SUB_STEPS_VIDEO = ["parsing", "searching", "renaming", "organizing"]
 
     def __init__(self, files: list[str], config: dict, state_file: str):
         """初始化批处理调度器。
@@ -103,6 +108,14 @@ class BatchProcessor(QThread):
         self.config = config
         self.state_file = state_file
         self._offline_mode = False
+
+        # —— MV 视频文件配置（合入同一线程处理）——
+        self.mv_config = config.get("mv", {})
+        exts = self.mv_config.get("video_extensions", [])
+        self.video_extensions = (
+            {ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in exts}
+            if exts else DEFAULT_VIDEO_EXTENSIONS
+        )
 
         # —— 断点续传状态管理器（§10.4）——
         self.state_manager = BatchStateManager(state_file)
@@ -207,6 +220,35 @@ class BatchProcessor(QThread):
             return False
 
     # ============================================================
+    # MV 视频文件扫描（合入同一线程）
+    # ============================================================
+
+    def _scan_video_files(self) -> list[str]:
+        """扫描源目录中的视频文件，返回路径列表。
+
+        优先使用 ``mv.source_dir``，未设置时回退到 ``last_input_dir``。
+        跳过系统隐藏文件夹（与 file_scanner 一致）。
+        """
+        source_dir = self.mv_config.get("source_dir", "") or self.config.get("last_input_dir", "")
+        if not source_dir:
+            return []
+
+        src = Path(source_dir)
+        if not src.exists():
+            return []
+
+        video_files: list[str] = []
+        SKIP_DIRS = {"$RECYCLE.BIN", "System Volume Information", "lost+found"}
+        for root, dirs, files in os.walk(src, topdown=True):
+            dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith('.')]
+            for f in sorted(files):
+                ext = Path(f).suffix.lower()
+                if ext in self.video_extensions:
+                    video_files.append(str(Path(root) / f))
+
+        return video_files
+
+    # ============================================================
     # 主循环（§10.1 完整处理流程）
     # ============================================================
 
@@ -221,6 +263,14 @@ class BatchProcessor(QThread):
         5. 全部完成后发射 batch_finished 信号
         """
         total = len(self.files)
+
+        # —— MV 视频文件扫描（如启用，合入同一处理循环）——
+        if self.mv_config.get("enabled", False):
+            video_files = self._scan_video_files()
+            if video_files:
+                logger.info(f"扫描到 {len(video_files)} 个 MV 视频文件，追加到批处理列表")
+                self.files.extend(video_files)
+                total = len(self.files)
 
         # —— 网络检测（§10.9 离线模式）——
         self._offline_mode = not self._check_network()
@@ -329,6 +379,11 @@ class BatchProcessor(QThread):
         Raises:
             Exception: 处理过程中的任何异常（由 run() 捕获并标记为 failed）。
         """
+        # —— MV 视频文件路由：跳过音频专有步骤（编码/标签写入/封面歌词）——
+        ext = Path(file_path).suffix.lower()
+        if ext in self.video_extensions:
+            return self._process_one_video(file_path, index, total)
+
         total_steps = len(self._SUB_STEPS)  # 6
         original_file_path = file_path  # 保留原始路径，后续重命名/整理会改变 file_path
 
@@ -401,6 +456,101 @@ class BatchProcessor(QThread):
         self.file_metadata_updated.emit(original_file_path, meta_dict)
 
         return file_path, f"已处理: {metadata.title} - {metadata.artist}"
+
+    # ============================================================
+    # MV 视频文件处理（合入同一线程，简化流程）
+    # ============================================================
+
+    def _process_one_video(self, file_path: str, index: int, total: int) -> tuple[str, str]:
+        """处理单个 MV 视频文件（从解析到整理），跳过编码/标签写入/封面歌词。
+
+        处理顺序（4 步）：
+        1. 文件名解析（离线）→ 提取 (title, artist)
+        2. 元数据搜索（在线）→ 获取 album / year（可选，受 mv.search_metadata 控制）
+        3. 重命名 → 按配置模板（与音频共用 FileRenamer）
+        4. 目录整理 → 与音频文件进入同一 Artist/Album 目录
+
+        Args:
+            file_path: 视频文件完整路径。
+            index: 当前文件在批处理列表中的索引（从 0 起）。
+            total: 批处理文件总数。
+
+        Returns:
+            ``(最终文件路径, 处理结果描述字符串)``。
+        """
+        total_steps = len(self._SUB_STEPS_VIDEO)  # 4
+        search_cfg = self.config.get("search", {})
+        search_enabled = search_cfg.get("enabled", True)
+        mv_search_enabled = self.mv_config.get("search_metadata", True)
+
+        # —— 步骤 1：文件名解析（离线）——
+        self.progress_updated.emit(index, total, "parsing", 1, total_steps)
+        filename = Path(file_path).name
+        file_stem = Path(file_path).stem
+        title, artist, _, uncertain = self.parser.parse(filename)
+        if not title:
+            title = file_stem
+        if not artist:
+            artist = ""
+
+        # —— 步骤 2：元数据搜索（在线，受 search.enabled + mv.search_metadata 控制）——
+        self.progress_updated.emit(index, total, "searching", 2, total_steps)
+        album = ""
+        year: Optional[int] = None
+        if search_enabled and mv_search_enabled and not self._offline_mode:
+            try:
+                metadata = self.engine.search_metadata(title, artist or "")
+                if metadata:
+                    if metadata.album:
+                        album = metadata.album
+                    year = metadata.release_year
+                    if metadata.title:
+                        title = metadata.title
+                    if metadata.artist and metadata.artist != "未知艺人":
+                        artist = metadata.artist
+            except Exception as e:
+                logger.warning(f"MV 元数据搜索失败 {file_path}: {e}")
+
+        # —— 非 MV 检测：文件名不匹配 MV 模式，且搜索也未确认是歌曲 → 跳过 ——
+        if uncertain and not artist:
+            file_name = os.path.basename(file_path)
+            logger.info(f"跳过非 MV 格式文件: {file_name}（文件名不匹配 MV 模式，搜索无结果）")
+            raise DuplicateFileException(f"跳过非 MV 格式: {file_name}")
+
+        # 构建 TrackMetadata（供 FileRenamer / FileOrganizer 共用）
+        meta = TrackMetadata(
+            title=title,
+            artist=artist or "未知艺人",
+            album=album,
+            release_year=year,
+        )
+
+        # —— 步骤 3：重命名（离线，按配置模板）——
+        self.progress_updated.emit(index, total, "renaming", 3, total_steps)
+        filename_cfg = self.config.get("filename", {})
+        if filename_cfg.get("enabled", True):
+            try:
+                new_path = self.file_renamer.rename(file_path, meta)
+                if new_path != file_path:
+                    file_path = new_path
+            except Exception as e:
+                logger.warning(f"MV 重命名失败 {file_path}: {e}")
+
+        # —— 步骤 4：目录整理（离线，与音频共用 FileOrganizer）——
+        self.progress_updated.emit(index, total, "organizing", 4, total_steps)
+        organize_cfg = self.config.get("organize", {})
+        if organize_cfg.get("enabled", True):
+            try:
+                organized = self._organize_file(file_path, meta)
+                if organized:
+                    file_path = organized
+            except DuplicateFileException:
+                # 允许 run() 捕获并处理跳过/覆盖
+                raise
+            except Exception as e:
+                logger.warning(f"MV 目录整理失败 {file_path}: {e}")
+
+        return file_path, f"已处理 MV: {title} - {artist}"
 
     # ------------------------------------------------------------------
     # _process_one 内联子步骤

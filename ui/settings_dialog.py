@@ -95,6 +95,13 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(10, 10, 10, 10)
 
         self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet("""
+            QTabBar::tab {
+                padding: 4px 8px;
+                font-size: 11px;
+                min-width: 40px;
+            }
+        """)
         self.tab_widget.addTab(self._build_search_tab(), "搜索")
         self.tab_widget.addTab(self._build_organize_tab(), "整理")
         self.tab_widget.addTab(self._build_filename_tab(), "文件名")

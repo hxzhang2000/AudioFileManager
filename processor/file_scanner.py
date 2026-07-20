@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 # 支持的音频格式
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".m4a", ".ogg", ".wma", ".ape"}
+# MV 视频文件扩展名（与 batch_processor.DEFAULT_VIDEO_EXTENSIONS 保持一致）
+DEFAULT_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".m4v"}
+# 所有支持的扩展名（音频 + 视频）
+SUPPORTED_EXTENSIONS = AUDIO_EXTENSIONS | DEFAULT_VIDEO_EXTENSIONS
 
 # 需要跳过的系统隐藏文件夹
 SKIP_DIRS = {"$RECYCLE.BIN", "System Volume Information", "lost+found"}

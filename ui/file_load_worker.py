@@ -22,6 +22,10 @@ from parser.metadata_reader import MetadataReader
 
 # 与 file_list_widget.AUDIO_EXTENSIONS / processor.file_scanner.AUDIO_EXTENSIONS 保持一致
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".m4a", ".ogg", ".wma", ".ape"}
+# MV 视频文件扩展名（与 processor.batch_processor.DEFAULT_VIDEO_EXTENSIONS 保持一致）
+DEFAULT_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".m4v"}
+# 所有支持的扩展名（音频 + 视频）
+SUPPORTED_EXTENSIONS = AUDIO_EXTENSIONS | DEFAULT_VIDEO_EXTENSIONS
 # 递归扫描时跳过的系统/隐藏目录（避免无权限或垃圾目录拖慢扫描）
 _SKIP_DIRS = {"$recycle.bin", "system volume information", "lost+found"}
 
@@ -66,9 +70,9 @@ class FileLoadWorker(QThread):
                         # 原地修改 dirs 以跳过系统隐藏文件夹（os.walk 约定）
                         dirs[:] = [d for d in dirs if d.lower() not in _SKIP_DIRS]
                         for fn in filenames:
-                            if Path(fn).suffix.lower() in AUDIO_EXTENSIONS:
+                            if Path(fn).suffix.lower() in SUPPORTED_EXTENSIONS:
                                 paths.append(os.path.join(root, fn))
-                elif os.path.isfile(item) and Path(item).suffix.lower() in AUDIO_EXTENSIONS:
+                elif os.path.isfile(item) and Path(item).suffix.lower() in SUPPORTED_EXTENSIONS:
                     paths.append(item)
         except Exception as e:
             self.error.emit(str(e))
